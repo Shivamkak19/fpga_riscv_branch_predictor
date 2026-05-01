@@ -352,6 +352,75 @@ test harness.
 
 ## 7. FPGA synthesis results
 
+We ran two complementary synth flows:
+
+1. **`yosys -p synth_xilinx -family xc7`** (committed): runs locally on the
+   laptop, gives a quick technology-mapped cell count comparison across
+   all five variants. Numbers below.
+2. **Vivado 2019.1 on the bench host** (script committed, run pending VPN):
+   produces the authoritative LUT/FF/DSP/BRAM utilization and timing
+   reports against the actual `xc7a100tcsg324-1` part.
+
+### 7.1 Yosys synth_xilinx — relative cell counts
+
+Synthesis target is the Artix-7 family (`xc7`). yosys's numbers are
+**rough**: ABC's mapping is generic, it doesn't pack into Xilinx-specific
+LUT primitives the way Vivado does, and it doesn't run physical
+placement. But for a relative comparison across variants on the same
+RTL, it's a fast and decent proxy.
+
+| Variant       | total cells | LUTs (LUT1–6) | FFs (FDRE/FDSE) | RAM32M | est. LCs |
+|---------------|------------:|--------------:|----------------:|-------:|---------:|
+| baseline      |      31,737 |        16,512 |             874 |     12 |   11,545 |
+| bp_static_nt  |      32,463 |        16,854 |             908 |     12 |   11,825 |
+| bp_bht1       |      33,138 |        17,288 |           1,164 |     12 |   12,063 |
+| bp_bht2       |      33,687 |        17,388 |           1,420 |     12 |   12,199 |
+| bp_gshare     |      34,839 |        17,955 |           1,428 |     12 |   12,675 |
+
+Δ vs baseline:
+
+| Variant       | Δ cells | Δ LUTs | Δ FFs | overhead |
+|---------------|--------:|-------:|------:|----------|
+| bp_static_nt  |    +726 |   +342 |   +34 | predictor pipeline regs + pre-decode (no actual prediction) |
+| bp_bht1       |  +1,401 |   +776 |  +290 | 256 1-bit BHT FFs + integration |
+| bp_bht2       |  +1,950 |   +876 |  +546 | 256×2-bit BHT FFs + saturating-counter logic |
+| bp_gshare     |  +3,102 | +1,443 |  +554 | 256×2-bit PHT + 8-bit GHR + XOR mix network |
+
+The FF deltas line up with what we expect from the table sizes:
+
+- `bp_bht1`: 256 FFs (BHT) + 2 (pred-pipeline regs) + a few for
+  integration ≈ 290.
+- `bp_bht2`: 512 FFs (BHT) + 2 + a few ≈ 546.
+- `bp_gshare`: 512 FFs (PHT) + 8 (GHR) + 2 + a few ≈ 554.
+
+Overall, the predictor adds **roughly 5–10% to total cells** vs the
+baseline core. Most of the LUT cost in GShare comes from the XOR mix
+of `PC ^ GHR` and the index decode for the 256-entry table — yosys
+maps these into LUT4/LUT5/LUT6 fan-in trees rather than the
+distributed-RAM-on-LUT primitive Vivado would prefer.
+
+![cell counts](../results/plots/synth_area.png)
+
+### 7.2 Performance per area
+
+The IPC-vs-area scatter (mean IPC across the 4 ubmarks vs total cells)
+makes the design tradeoff immediately visible:
+
+![IPC vs area](../results/plots/ipc_vs_area.png)
+
+Baseline and `static_nt` cluster around IPC 0.71 — the predictor
+integration logic by itself produces no IPC change. BHT-1, BHT-2 and
+GShare jump to ~0.89-0.91 IPC, with very similar accuracy.
+
+**The Pareto-optimal point is BHT-1**: it is the smallest of the three
+useful predictors (~5% area overhead vs baseline) and matches BHT-2's
+mean IPC to three decimals. BHT-2 buys a tiny improvement on
+`bin-search` for an extra ~250 FFs. GShare costs more cells *and* is
+slightly less accurate on this workload mix because its history
+correlation hurts on tight loops.
+
+### 7.3 Vivado synth (on-bench) — to be filled
+
 The Vivado synth flow runs on the lab bench host
 (`bench@10.50.62.45`, Nexys-4 DDR / Artix-7 xc7a100tcsg324-1).
 `fpga/synth_scripts/synth_variant.tcl` performs the per-variant

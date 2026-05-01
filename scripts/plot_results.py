@@ -131,3 +131,57 @@ with open(OUT / "summary.md", "w") as f:
                 cells.append("-")
         f.write(f"| {b} | " + " | ".join(cells) + " |\n")
 print("wrote", OUT / "summary.md")
+
+# --- Synth comparison: yosys cell counts per variant ---
+synth_tsv = RESULTS / "yosys_summary.tsv"
+if synth_tsv.exists():
+    with open(synth_tsv) as f:
+        rows = list(csv.DictReader(f, delimiter="\t"))
+    if rows:
+        labels = [VARIANT_LABEL.get(r["variant"], r["variant"]) for r in rows]
+        cells = [int(r["cells"]) if r["cells"].isdigit() else 0 for r in rows]
+        luts  = [int(r["LUTs"])  if r["LUTs"].isdigit()  else 0 for r in rows]
+        ffs   = [int(r["FFs"])   if r["FFs"].isdigit()   else 0 for r in rows]
+
+        fig, axes = plt.subplots(1, 3, figsize=(13, 4))
+        for ax, vals, title, color in [
+            (axes[0], cells, "Total cells",       "tab:blue"),
+            (axes[1], luts,  "LUTs (sum LUT1-6)", "tab:green"),
+            (axes[2], ffs,   "FFs (FDRE+FDSE)",   "tab:red"),
+        ]:
+            ax.bar(labels, vals, color=color)
+            ax.set_title(title)
+            ax.tick_params(axis="x", labelrotation=20)
+            ax.grid(axis="y", linestyle=":", alpha=0.6)
+            for i, vv in enumerate(vals):
+                ax.text(i, vv, f"{vv}", ha="center", va="bottom", fontsize=8)
+        fig.suptitle("yosys synth_xilinx (xc7) cell counts by variant — relative comparison", fontsize=11)
+        plt.tight_layout()
+        plt.savefig(OUT / "synth_area.png", dpi=130)
+        plt.close()
+        print("wrote", OUT / "synth_area.png")
+
+        # IPC vs area scatter
+        # Use mean IPC across the 4 ubmarks for each variant
+        mean_ipc = {}
+        for v in VARIANTS:
+            xs_ = [float(data[b][v]["ipc"]) for b in benches if v in data[b]]
+            mean_ipc[v] = sum(xs_) / len(xs_) if xs_ else 0
+        fig, ax = plt.subplots(figsize=(8, 5))
+        for r, lbl, color in zip(
+                rows, labels,
+                ["tab:gray", "tab:orange", "tab:blue", "tab:red", "tab:purple"]):
+            v = r["variant"]
+            mip = mean_ipc.get(v, 0)
+            cl = int(r["cells"]) if r["cells"].isdigit() else 0
+            ax.scatter(cl, mip, s=120, color=color, edgecolor="black", zorder=3)
+            ax.annotate(lbl, (cl, mip), xytext=(8, 5), textcoords="offset points")
+        ax.set_xlabel("yosys cell count (relative area)")
+        ax.set_ylabel("mean IPC across 4 ubmarks")
+        ax.set_title("Performance vs area: IPC per cell")
+        ax.grid(linestyle=":", alpha=0.5)
+        ax.set_ylim(0.65, 1.0)
+        plt.tight_layout()
+        plt.savefig(OUT / "ipc_vs_area.png", dpi=130)
+        plt.close()
+        print("wrote", OUT / "ipc_vs_area.png")
