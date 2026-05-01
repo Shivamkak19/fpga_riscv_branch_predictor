@@ -239,29 +239,44 @@ module riscv_CoreCtrl
     .update_mispredict(mispredict_Xhl)
   );
 
-  // Redirect at F only for predicted-taken B-types. JAL/JALR keep their
-  // existing D-stage redirect path (1-cycle penalty unchanged from baseline).
-  wire pred_redirect_Fhl = inst_val_Fhl && is_branch_F && predict_taken_F;
-  assign pred_target_Fhl = br_target_F;
+  // F-stage redirects on:
+  //   - predicted-taken B-type (predictor says taken),
+  //   - any JAL (deterministic target, always taken).
+  // JALR is still resolved at D (no F-stage target available without rs1).
+`ifdef BP_PRED_JAL
+  wire pred_jal_active_F  = inst_val_Fhl && is_jal_F;
+  wire pred_redirect_Fhl  = (inst_val_Fhl && is_branch_F && predict_taken_F)
+                          || pred_jal_active_F;
+  assign pred_target_Fhl  = is_jal_F ? jal_target_F : br_target_F;
+`else
+  wire pred_jal_active_F  = 1'b0;
+  wire pred_redirect_Fhl  = inst_val_Fhl && is_branch_F && predict_taken_F;
+  assign pred_target_Fhl  = br_target_F;
+`endif
 
   // Pipeline pred_taken through F -> D -> X. We tag each pipeline reg with
   // a "this stage held a B-type that was actually predicted" flag so the
   // X-stage compare doesn't get confused by non-branches.
   reg pred_taken_Dhl_r;
   reg pred_taken_Xhl_r;
+  reg pred_jal_Dhl_r;
   always @(posedge clk) begin
     if (reset) begin
       pred_taken_Dhl_r <= 1'b0;
       pred_taken_Xhl_r <= 1'b0;
+      pred_jal_Dhl_r   <= 1'b0;
     end
     else begin
-      if (!stall_Dhl)
+      if (!stall_Dhl) begin
         pred_taken_Dhl_r <= (inst_val_Fhl && is_branch_F) ? predict_taken_F : 1'b0;
+        pred_jal_Dhl_r   <= pred_jal_active_F;
+      end
       if (!stall_Xhl)
         pred_taken_Xhl_r <= pred_taken_Dhl_r;
     end
   end
   wire pred_taken_Xhl = pred_taken_Xhl_r;
+  wire pred_jal_Dhl  = pred_jal_Dhl_r;
 `endif
 
   //----------------------------------------------------------------------
@@ -529,7 +544,17 @@ module riscv_CoreCtrl
 
   // Jump and Branch Controls
 
+`ifdef BP_PRED_JAL
+  // JAL has cs[PC_SEL] = pm_j (2'd2). When F already redirected this JAL,
+  // the D-stage redirect is to the same target — squashing F at D would be
+  // a wasted cycle. Suppress brj_taken_Dhl in that case.
+  wire is_jal_Dhl = inst_val_Dhl && cs[`RISCV_INST_MSG_J_EN]
+                                 && (cs[`RISCV_INST_MSG_PC_SEL] == 2'd2);
+  wire brj_taken_Dhl = ( inst_val_Dhl && cs[`RISCV_INST_MSG_J_EN] )
+                       && !(is_jal_Dhl && pred_jal_Dhl);
+`else
   wire       brj_taken_Dhl = ( inst_val_Dhl && cs[`RISCV_INST_MSG_J_EN] );
+`endif
   wire [2:0] br_sel_Dhl    = cs[`RISCV_INST_MSG_BR_SEL]; 
 
   // PC Mux Select

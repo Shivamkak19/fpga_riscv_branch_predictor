@@ -38,20 +38,21 @@ module bp_gshare #(
   reg  [HIST_BITS-1:0] ghr_r;
   reg  [1:0]           pht_r [ENTRIES-1:0];
 
-  // Index width-match for the XOR.
+  // Index width-match for the XOR. Zero-extend the history to a fixed
+  // 32-bit width, then truncate to INDEX_BITS — this keeps all bit-slice
+  // expressions in-range regardless of whether HIST_BITS is larger or
+  // smaller than INDEX_BITS.
   function [INDEX_BITS-1:0] mix;
     input [PC_BITS-1:0]   pc;
     input [HIST_BITS-1:0] hist;
     reg   [INDEX_BITS-1:0] pcbits;
     reg   [INDEX_BITS-1:0] hbits;
+    reg   [31:0]           hist_pad;
     begin
-      pcbits = pc[INDEX_BITS+1:2];
-      // Sign-extend / truncate hist to INDEX_BITS by zero-pad or slice.
-      if (HIST_BITS >= INDEX_BITS)
-        hbits = hist[INDEX_BITS-1:0];
-      else
-        hbits = { {(INDEX_BITS-HIST_BITS){1'b0}}, hist };
-      mix = pcbits ^ hbits;
+      pcbits   = pc[INDEX_BITS+1:2];
+      hist_pad = { {(32-HIST_BITS){1'b0}}, hist };
+      hbits    = hist_pad[INDEX_BITS-1:0];
+      mix      = pcbits ^ hbits;
     end
   endfunction
 

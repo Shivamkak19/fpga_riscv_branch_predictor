@@ -24,7 +24,7 @@ case "$VARIANT" in
       "$REPO_ROOT/rtl/baseline/imuldiv"
     )
     ;;
-  bp_static_nt|bp_bht1|bp_bht2|bp_gshare)
+  bp_static_nt|bp_bht1|bp_bht2|bp_gshare|bp_bht2_jal|bp_gshare_jal)
     RTL_DIRS=(
       "$REPO_ROOT/rtl/core"
       "$REPO_ROOT/rtl/bp"
@@ -37,6 +37,8 @@ case "$VARIANT" in
       bp_bht1)      DEFINES+=(-DBP_BHT1)      ;;
       bp_bht2)      DEFINES+=(-DBP_BHT2)      ;;
       bp_gshare)    DEFINES+=(-DBP_GSHARE)    ;;
+      bp_bht2_jal)  DEFINES+=(-DBP_BHT2 -DBP_PRED_JAL) ;;
+      bp_gshare_jal) DEFINES+=(-DBP_GSHARE -DBP_PRED_JAL) ;;
     esac
     ;;
   *)

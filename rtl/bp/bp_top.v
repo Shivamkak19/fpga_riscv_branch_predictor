@@ -21,8 +21,16 @@
 
 module bp_top #(
   parameter PC_BITS    = 32,
+`ifdef BP_INDEX_BITS
+  parameter INDEX_BITS = `BP_INDEX_BITS,
+`else
   parameter INDEX_BITS = 8,
+`endif
+`ifdef BP_HIST_BITS
+  parameter HIST_BITS  = `BP_HIST_BITS
+`else
   parameter HIST_BITS  = 8
+`endif
 ) (
   input                clk,
   input                reset,

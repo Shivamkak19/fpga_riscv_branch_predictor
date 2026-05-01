@@ -9,6 +9,8 @@ results/*/ubmark-*.log
 results/*/ubmark-*.log.build
 results/*_run.log
 results/build_*.log
+results/sweep/build_*.log
+results/sweep/run_*.log
 
 # autotools detritus
 benchmarks/tests/autom4te.cache/
