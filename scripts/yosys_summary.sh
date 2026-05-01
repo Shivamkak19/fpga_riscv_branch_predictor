@@ -11,7 +11,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUT="$REPO_ROOT/results/yosys_summary.tsv"
 echo -e "variant\tcells\tLUTs\tFFs\tRAM32M\tRAMB\test_LCs" > "$OUT"
 
-for v in baseline bp_static_nt bp_bht1 bp_bht2 bp_gshare; do
+for v in baseline bp_static_nt bp_bht1 bp_bht2 bp_gshare bp_bht2_jal bp_gshare_jal bp_bht2_full bp_gshare_full; do
   log="$REPO_ROOT/results/$v/yosys_stat.txt"
   if [ ! -f "$log" ]; then
     echo "skip $v (no log)"

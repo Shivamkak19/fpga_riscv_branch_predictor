@@ -76,7 +76,11 @@ module riscv_CoreDpath
   output [31:0] pc_Fhl_out,            // PC of F-stage instruction
   output [31:0] pc_Xhl_out,            // PC of X-stage instruction
   input  [31:0] pred_target_Fhl,       // F-stage predicted target (B-type or JAL)
-  input         redirect_to_target_Xhl // when mispredict redirects: 1=branch_targ, 0=pc+4
+  input         redirect_to_target_Xhl, // when mispredict redirects: 1=branch_targ, 0=pc+4
+  // RAS-prediction match: 1 if F-stage predicted target equals the
+  // D-stage JALR target (jumpreg_targ_Dhl) — used to suppress the
+  // redundant D-stage redirect when RAS got it right.
+  output        pred_target_match_Dhl
 `endif
 );
 
@@ -465,6 +469,16 @@ module riscv_CoreDpath
 `ifdef BP_ENABLED
   assign pc_Fhl_out = pc_Fhl;
   assign pc_Xhl_out = pc_Xhl;
+
+  // Pipeline pred_target_Fhl into D so we can compare against the actual
+  // JALR target computed in D (jumpreg_targ_Dhl). Used by ctrl to suppress
+  // the redundant D-stage redirect when RAS got it right.
+  reg [31:0] pred_target_Dhl_r;
+  always @(posedge clk) begin
+    if (reset)        pred_target_Dhl_r <= 32'b0;
+    else if (!stall_Dhl) pred_target_Dhl_r <= pred_target_Fhl;
+  end
+  assign pred_target_match_Dhl = (pred_target_Dhl_r == jumpreg_targ_Dhl);
 `endif
   
   //----------------------------------------------------------------------

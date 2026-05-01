@@ -12,6 +12,10 @@ results/build_*.log
 results/sweep/build_*.log
 results/sweep/run_*.log
 
+# Yosys per-variant logs are large and contain absolute paths; keep only
+# the aggregated yosys_summary.tsv.
+results/*/yosys_stat.txt
+
 # autotools detritus
 benchmarks/tests/autom4te.cache/
 benchmarks/ubmark/autom4te.cache/

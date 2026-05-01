@@ -25,13 +25,19 @@ RESULTS = REPO / "results"
 OUT = RESULTS / "plots"
 OUT.mkdir(parents=True, exist_ok=True)
 
-VARIANTS = ["baseline", "bp_static_nt", "bp_bht1", "bp_bht2", "bp_gshare"]
+VARIANTS = ["baseline", "bp_static_nt", "bp_bht1", "bp_bht2", "bp_gshare",
+            "bp_bht2_jal", "bp_gshare_jal",
+            "bp_bht2_full", "bp_gshare_full"]
 VARIANT_LABEL = {
-    "baseline":    "baseline",
-    "bp_static_nt": "static-NT",
-    "bp_bht1":     "BHT-1",
-    "bp_bht2":     "BHT-2",
-    "bp_gshare":   "GShare",
+    "baseline":       "baseline",
+    "bp_static_nt":   "static-NT",
+    "bp_bht1":        "BHT-1",
+    "bp_bht2":        "BHT-2",
+    "bp_gshare":      "GShare",
+    "bp_bht2_jal":    "BHT-2 + JAL",
+    "bp_gshare_jal":  "GShare + JAL",
+    "bp_bht2_full":   "BHT-2 full",
+    "bp_gshare_full": "GShare full",
 }
 
 def load(variant):
@@ -167,10 +173,10 @@ if synth_tsv.exists():
         for v in VARIANTS:
             xs_ = [float(data[b][v]["ipc"]) for b in benches if v in data[b]]
             mean_ipc[v] = sum(xs_) / len(xs_) if xs_ else 0
-        fig, ax = plt.subplots(figsize=(8, 5))
-        for r, lbl, color in zip(
-                rows, labels,
-                ["tab:gray", "tab:orange", "tab:blue", "tab:red", "tab:purple"]):
+        fig, ax = plt.subplots(figsize=(9, 5.5))
+        cmap = plt.get_cmap("tab10")
+        for i, (r, lbl) in enumerate(zip(rows, labels)):
+            color = cmap(i % 10)
             v = r["variant"]
             mip = mean_ipc.get(v, 0)
             cl = int(r["cells"]) if r["cells"].isdigit() else 0

@@ -548,20 +548,119 @@ from exactly this flow on the local laptop.
 
 ---
 
-## 10. Open work
+## 10. Stretch goals (proposal §RAS, JAL prediction)
 
-1. **FPGA synth runs.** Five Vivado batch jobs (one per variant),
-   each ~10–15 minutes on the Artix-7 part. Pending VPN reconnect.
+The proposal listed two optional extensions: JAL prediction at the F
+stage, and a Return Address Stack for JALR returns. Both are now
+implemented behind separate defines (`BP_PRED_JAL`, `BP_RAS`).
+
+### 10.1 JAL prediction at F (`BP_PRED_JAL`)
+
+The pre-decoder already detects JAL and computes `jal_target = pc +
+imm_uj`. Under `BP_PRED_JAL`, the F stage redirects on JAL too — same
+mechanism as predicted-taken B-types. To avoid the wasted re-redirect
+that would otherwise happen at D, the D-stage `brj_taken_Dhl` is
+suppressed when the F-stage JAL prediction was the JAL we just decoded.
+
+This saves **1 cycle per JAL** in the program. On `ubmark-bin-search`
+(43 JALs), it lifts IPC from 0.821 (`bp_bht2`) to 0.845
+(`bp_bht2_jal`) — a +2.9% gain. On the other ubmarks, JAL count is
+small (1–3) so the IPC delta is below 0.1%.
+
+### 10.2 Return Address Stack (`BP_RAS`)
+
+`bp_ras.v` is an 8-entry × 32-bit LIFO. The pre-decoder classifies the
+F-stage instruction as a *call* (JAL or JALR with `rd == x1`) or a
+*return* (JALR with `rs1 == x1` and `rd != x1`). On a call, F pushes
+`pc+4` onto the stack; on a return, F pops the top and uses it as the
+predicted target for the JALR.
+
+To benefit, the redundant D-stage redirect must be suppressed when
+the RAS prediction was correct. Detection happens in dpath: a 32-bit
+register pipelines `pred_target_Fhl` to D, where it is compared
+against the actual `jumpreg_targ_Dhl`. The 1-bit comparison result
+(`pred_target_match_Dhl`) feeds back to ctrl, which gates
+`brj_taken_Dhl` for JALR-returns.
+
+RAS is correctness-safe by construction: when a return mispredicts
+(stack stale, target mismatch), `pred_target_match_Dhl == 0`, the
+D-stage redirect is allowed to fire, and the wrong-path instructions
+in F+D are squashed. A wrong RAS prediction therefore costs the same
+1-cycle penalty as no RAS — but a correct prediction saves that cycle.
+
+Effect on these benchmarks is small: the ubmarks have only 1–3 JALR
+returns each, and several of those are the final return-from-main
+(stack is fine but the test exits via CSR write before observing the
+return). `ubmark-masked-filter` picks up 1 cycle (`bp_bht2_jal` 9538
+→ `bp_bht2_full` 9537). On a workload with deeper recursion or more
+function calls, the RAS would matter more — this design exploration
+shows the *mechanism* even if the test mix doesn't exercise it
+heavily.
+
+### 10.3 Final IPC across all variants (4 ubmarks)
+
+| Variant         | vvadd  | cmplx-mult | bin-search | masked-filter | mean   |
+|-----------------|-------:|-----------:|-----------:|--------------:|-------:|
+| baseline        | 0.6986 |   0.7475   |   0.7146   |    0.6819     | 0.7106 |
+| static-NT       | 0.6986 |   0.7475   |   0.7146   |    0.6819     | 0.7106 |
+| BHT-1           | 0.9914 |   0.9116   |   0.8128   |    0.9242     | 0.9100 |
+| BHT-2           | 0.9914 |   0.9116   |   0.8208   |    0.9222     | 0.9115 |
+| GShare          | 0.9665 |   0.9019   |   0.7799   |    0.9216     | 0.8925 |
+| BHT-2 + JAL     | 0.9919 |   0.9121   |   0.8454   |    0.9223     | 0.9179 |
+| GShare + JAL    | 0.9670 |   0.9024   |   0.8021   |    0.9217     | 0.8983 |
+| BHT-2 full      | 0.9919 |   0.9121   |   0.8454   |    0.9224     | 0.9180 |
+| GShare full     | 0.9670 |   0.9024   |   0.8021   |    0.9218     | 0.8983 |
+
+"full" = BHT/GShare + JAL prediction + RAS.
+
+### 10.4 Yosys synth across all 9 variants
+
+| Variant         | cells | LUTs  | FFs   | Δ-FFs vs base |
+|-----------------|------:|------:|------:|--------------:|
+| baseline        | 31737 | 16512 |   874 |             0 |
+| static-NT       | 32686 | 16847 |   940 |           +66 |
+| BHT-1           | 33472 | 17370 |  1196 |          +322 |
+| BHT-2           | 33849 | 17450 |  1452 |          +578 |
+| GShare          | 35024 | 18026 |  1460 |          +586 |
+| BHT-2 + JAL     | 33886 | 17477 |  1453 |          +579 |
+| GShare + JAL    | 35071 | 18056 |  1461 |          +587 |
+| BHT-2 full      | 34240 | 17608 |  1714 |          +840 |
+| GShare full     | 35389 | 18171 |  1722 |          +848 |
+
+JAL prediction adds essentially nothing — one pipeline reg + a few
+LUTs (~30 cells). RAS adds ~260 FFs (the 8 × 32-bit stack) plus the
+~32-bit pipelined comparator and target reg in dpath, totaling about
+~390 more cells than the JAL-only build.
+
+### 10.5 Final tradeoff picture
+
+![IPC vs area](../results/plots/ipc_vs_area.png)
+
+The Pareto front collapses to two candidates:
+
+- **BHT-1** at the low end of the frontier: smallest predictor that
+  delivers 0.910 mean IPC (only 0.001 below BHT-2 and within
+  measurement noise on these benchmarks).
+- **BHT-2 full** at the high end: 0.918 mean IPC, +391 cells over
+  BHT-2 plain, mostly from the RAS state.
+
+GShare costs more area than BHT-2 full and delivers *less* IPC on
+this workload mix — for these microbenchmarks the global-history
+correlation that GShare is built around just isn't there. On a
+workload with stronger inter-branch correlation (e.g. SPECint
+benchmarks with mutually-conditional branches in tight loops),
+GShare would be expected to overtake BHT-2; we don't have those
+benchmarks ported, so the Pareto picture here is what it is.
+
+---
+
+## 11. Open work
+
+1. **Vivado synth on the bench host.** Nine batch jobs (one per
+   variant), each ~10–15 minutes on the Artix-7 part. The
+   synth_variant.tcl already supports all variant names. Pending VPN
+   reconnect.
 2. **On-board IPS measurement.** With the bitstream programmed, run
    each ubmark via the UART loader and record wall-clock cycles. This
-   gives the actual instructions-per-second number to combine with
-   the synth-reported Fmax for the final performance/area picture.
-3. **(Optional, time-permitting) Return-Address Stack** for JALR.
-   The pre-decoder already identifies JALR; a small 8-deep RAS would
-   eliminate the 1-cycle JALR penalty on function returns. Folded
-   into `bp_top` behind another define.
-4. **(Optional) JAL prediction at F.** The pre-decoder already
-   computes `jal_target`; redirecting JAL at F would save the
-   1-cycle D-stage redirect on every JAL. Avoided so far to keep
-   the squash logic for D-stage redirects untouched and the change
-   surface area small.
+   combines with Vivado's reported Fmax to give actual
+   instructions-per-second.

@@ -57,6 +57,7 @@ module riscv_Core
   wire [31:0] pc_Xhl;
   wire [31:0] pred_target_Fhl;
   wire        redirect_to_target_Xhl;
+  wire        pred_target_match_Dhl;
   wire        bp_resolve_Xhl;
   wire        bp_correct_Xhl;
   wire        mispredict_Xhl;
@@ -216,6 +217,7 @@ module riscv_Core
     .pc_Xhl                 (pc_Xhl),
     .pred_target_Fhl        (pred_target_Fhl),
     .redirect_to_target_Xhl (redirect_to_target_Xhl),
+    .pred_target_match_Dhl  (pred_target_match_Dhl),
     .bp_resolve_Xhl         (bp_resolve_Xhl),
     .bp_correct_Xhl         (bp_correct_Xhl),
     .mispredict_Xhl         (mispredict_Xhl)
@@ -288,7 +290,8 @@ module riscv_Core
     .pc_Fhl_out              (pc_Fhl),
     .pc_Xhl_out              (pc_Xhl),
     .pred_target_Fhl         (pred_target_Fhl),
-    .redirect_to_target_Xhl  (redirect_to_target_Xhl)
+    .redirect_to_target_Xhl  (redirect_to_target_Xhl),
+    .pred_target_match_Dhl   (pred_target_match_Dhl)
 `endif
   );
 

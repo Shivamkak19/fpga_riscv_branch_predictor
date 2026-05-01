@@ -9,6 +9,9 @@
 `ifdef BP_ENABLED
 `include "bp_predecode.v"
 `include "bp_top.v"
+`ifdef BP_RAS
+`include "bp_ras.v"
+`endif
 `endif
 
 module riscv_CoreCtrl
@@ -86,6 +89,7 @@ module riscv_CoreCtrl
   input  [31:0] pc_Xhl,
   output [31:0] pred_target_Fhl,
   output        redirect_to_target_Xhl,
+  input         pred_target_match_Dhl,    // 1 iff F-stage prediction matches D-stage JALR target
 
   // Testbench probes
   output        bp_resolve_Xhl,
@@ -216,6 +220,8 @@ module riscv_CoreCtrl
   wire        is_jalr_F;
   wire [31:0] br_target_F;
   wire [31:0] jal_target_F;
+  wire        is_call_F;
+  wire        is_return_F;
 
   bp_predecode u_predec (
     .inst       (imemresp_queue_mux_out_Fhl),
@@ -224,7 +230,9 @@ module riscv_CoreCtrl
     .is_jal     (is_jal_F),
     .is_jalr    (is_jalr_F),
     .br_target  (br_target_F),
-    .jal_target (jal_target_F)
+    .jal_target (jal_target_F),
+    .is_call    (is_call_F),
+    .is_return  (is_return_F)
   );
 
   wire predict_taken_F;
@@ -239,20 +247,49 @@ module riscv_CoreCtrl
     .update_mispredict(mispredict_Xhl)
   );
 
-  // F-stage redirects on:
-  //   - predicted-taken B-type (predictor says taken),
-  //   - any JAL (deterministic target, always taken).
-  // JALR is still resolved at D (no F-stage target available without rs1).
+  //----------------------------------------------------------------------
+  // F-stage redirects:
+  //   - predicted-taken B-type
+  //   - any JAL (deterministic target)             (BP_PRED_JAL)
+  //   - JALR-return predicted from RAS top         (BP_RAS)
+  // JALR that isn't a return still resolves at D (existing 1-cycle penalty).
+  //----------------------------------------------------------------------
+`ifdef BP_RAS
+  wire [31:0] ras_top_F;
+  wire        ras_top_valid_F;
+  bp_ras #(.DEPTH(8), .PC_BITS(32), .PTR_BITS(3)) u_ras (
+    .clk       (clk),
+    .reset     (reset),
+    .push_en   (inst_val_Fhl && is_call_F),
+    .push_addr (pc_Fhl + 32'd4),
+    .pop_en    (inst_val_Fhl && is_return_F && ras_top_valid_F),
+    .top_addr  (ras_top_F),
+    .top_valid (ras_top_valid_F)
+  );
+  wire ras_predict_F = inst_val_Fhl && is_return_F && ras_top_valid_F;
+`else
+  wire        ras_predict_F  = 1'b0;
+  wire [31:0] ras_top_F      = 32'b0;
+`endif
+
 `ifdef BP_PRED_JAL
   wire pred_jal_active_F  = inst_val_Fhl && is_jal_F;
-  wire pred_redirect_Fhl  = (inst_val_Fhl && is_branch_F && predict_taken_F)
-                          || pred_jal_active_F;
-  assign pred_target_Fhl  = is_jal_F ? jal_target_F : br_target_F;
 `else
   wire pred_jal_active_F  = 1'b0;
-  wire pred_redirect_Fhl  = inst_val_Fhl && is_branch_F && predict_taken_F;
-  assign pred_target_Fhl  = br_target_F;
 `endif
+
+  wire pred_branch_active_F = inst_val_Fhl && is_branch_F && predict_taken_F;
+
+  wire pred_redirect_Fhl =
+        pred_branch_active_F
+      || pred_jal_active_F
+      || ras_predict_F;
+
+  // Target priority: RAS for returns > JAL > B-type
+  assign pred_target_Fhl =
+        ras_predict_F     ? ras_top_F
+      : pred_jal_active_F ? jal_target_F
+      :                     br_target_F;
 
   // Pipeline pred_taken through F -> D -> X. We tag each pipeline reg with
   // a "this stage held a B-type that was actually predicted" flag so the
@@ -260,16 +297,19 @@ module riscv_CoreCtrl
   reg pred_taken_Dhl_r;
   reg pred_taken_Xhl_r;
   reg pred_jal_Dhl_r;
+  reg pred_return_Dhl_r;
   always @(posedge clk) begin
     if (reset) begin
-      pred_taken_Dhl_r <= 1'b0;
-      pred_taken_Xhl_r <= 1'b0;
-      pred_jal_Dhl_r   <= 1'b0;
+      pred_taken_Dhl_r  <= 1'b0;
+      pred_taken_Xhl_r  <= 1'b0;
+      pred_jal_Dhl_r    <= 1'b0;
+      pred_return_Dhl_r <= 1'b0;
     end
     else begin
       if (!stall_Dhl) begin
-        pred_taken_Dhl_r <= (inst_val_Fhl && is_branch_F) ? predict_taken_F : 1'b0;
-        pred_jal_Dhl_r   <= pred_jal_active_F;
+        pred_taken_Dhl_r  <= (inst_val_Fhl && is_branch_F) ? predict_taken_F : 1'b0;
+        pred_jal_Dhl_r    <= pred_jal_active_F;
+        pred_return_Dhl_r <= ras_predict_F;
       end
       if (!stall_Xhl)
         pred_taken_Xhl_r <= pred_taken_Dhl_r;
@@ -277,6 +317,7 @@ module riscv_CoreCtrl
   end
   wire pred_taken_Xhl = pred_taken_Xhl_r;
   wire pred_jal_Dhl  = pred_jal_Dhl_r;
+  wire pred_return_Dhl = pred_return_Dhl_r;
 `endif
 
   //----------------------------------------------------------------------
@@ -544,14 +585,34 @@ module riscv_CoreCtrl
 
   // Jump and Branch Controls
 
+`ifdef BP_ENABLED
+  // JAL has cs[PC_SEL] = pm_j (2'd2), JALR has cs[PC_SEL] = pm_r (2'd3).
+  // We suppress brj_taken_Dhl in two cases:
+  //   1. JAL already correctly predicted at F (under BP_PRED_JAL)
+  //   2. JALR-return correctly predicted at F via RAS (under BP_RAS),
+  //      detected by pred_target_match_Dhl coming back from dpath.
+  wire is_jal_Dhl_w  = inst_val_Dhl && cs[`RISCV_INST_MSG_J_EN]
+                                    && (cs[`RISCV_INST_MSG_PC_SEL] == 2'd2);
+  wire is_jalr_Dhl_w = inst_val_Dhl && cs[`RISCV_INST_MSG_J_EN]
+                                    && (cs[`RISCV_INST_MSG_PC_SEL] == 2'd3);
+
+  wire raw_brj_taken_Dhl = ( inst_val_Dhl && cs[`RISCV_INST_MSG_J_EN] );
+
+  wire suppress_jal_Dhl =
 `ifdef BP_PRED_JAL
-  // JAL has cs[PC_SEL] = pm_j (2'd2). When F already redirected this JAL,
-  // the D-stage redirect is to the same target — squashing F at D would be
-  // a wasted cycle. Suppress brj_taken_Dhl in that case.
-  wire is_jal_Dhl = inst_val_Dhl && cs[`RISCV_INST_MSG_J_EN]
-                                 && (cs[`RISCV_INST_MSG_PC_SEL] == 2'd2);
-  wire brj_taken_Dhl = ( inst_val_Dhl && cs[`RISCV_INST_MSG_J_EN] )
-                       && !(is_jal_Dhl && pred_jal_Dhl);
+        is_jal_Dhl_w && pred_jal_Dhl;
+`else
+        1'b0;
+`endif
+
+  wire suppress_jalr_ret_Dhl =
+`ifdef BP_RAS
+        is_jalr_Dhl_w && pred_return_Dhl && pred_target_match_Dhl;
+`else
+        1'b0;
+`endif
+
+  wire brj_taken_Dhl = raw_brj_taken_Dhl && !suppress_jal_Dhl && !suppress_jalr_ret_Dhl;
 `else
   wire       brj_taken_Dhl = ( inst_val_Dhl && cs[`RISCV_INST_MSG_J_EN] );
 `endif

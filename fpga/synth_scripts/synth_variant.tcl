@@ -43,7 +43,9 @@ switch -- $variant {
       file copy -force $f "$lab_root/riscvlong/[file tail $f]"
     }
   }
-  bp_static_nt - bp_bht1 - bp_bht2 - bp_gshare {
+  bp_static_nt - bp_bht1 - bp_bht2 - bp_gshare -
+  bp_bht2_jal - bp_gshare_jal -
+  bp_bht2_full - bp_gshare_full {
     # Predictor-aware core + BP modules.
     set core_dir "$repo_root/rtl/core"
     foreach f [glob -nocomplain "$core_dir/*.v"] {
@@ -56,10 +58,14 @@ switch -- $variant {
     }
     lappend defines "BP_ENABLED"
     switch -- $variant {
-      bp_static_nt { lappend defines "BP_STATIC_NT" }
-      bp_bht1      { lappend defines "BP_BHT1" }
-      bp_bht2      { lappend defines "BP_BHT2" }
-      bp_gshare    { lappend defines "BP_GSHARE" }
+      bp_static_nt   { lappend defines "BP_STATIC_NT" }
+      bp_bht1        { lappend defines "BP_BHT1" }
+      bp_bht2        { lappend defines "BP_BHT2" }
+      bp_gshare      { lappend defines "BP_GSHARE" }
+      bp_bht2_jal    { lappend defines "BP_BHT2"; lappend defines "BP_PRED_JAL" }
+      bp_gshare_jal  { lappend defines "BP_GSHARE"; lappend defines "BP_PRED_JAL" }
+      bp_bht2_full   { lappend defines "BP_BHT2"; lappend defines "BP_PRED_JAL"; lappend defines "BP_RAS" }
+      bp_gshare_full { lappend defines "BP_GSHARE"; lappend defines "BP_PRED_JAL"; lappend defines "BP_RAS" }
     }
   }
   default {

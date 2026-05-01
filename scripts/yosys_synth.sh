@@ -22,14 +22,18 @@ case "$VARIANT" in
     TOP="riscv_Core"
     SRC="$REPO_ROOT/rtl/baseline/riscvlong/riscvlong-Core.v"
     ;;
-  bp_static_nt|bp_bht1|bp_bht2|bp_gshare)
+  bp_static_nt|bp_bht1|bp_bht2|bp_gshare|bp_bht2_jal|bp_gshare_jal|bp_bht2_full|bp_gshare_full)
     RTL_DIRS=("$REPO_ROOT/rtl/core" "$REPO_ROOT/rtl/bp" "$REPO_ROOT/rtl/baseline/vc" "$REPO_ROOT/rtl/baseline/imuldiv")
     DEFINES=(-DBP_ENABLED)
     case "$VARIANT" in
-      bp_static_nt) DEFINES+=(-DBP_STATIC_NT) ;;
-      bp_bht1)      DEFINES+=(-DBP_BHT1)      ;;
-      bp_bht2)      DEFINES+=(-DBP_BHT2)      ;;
-      bp_gshare)    DEFINES+=(-DBP_GSHARE)    ;;
+      bp_static_nt)   DEFINES+=(-DBP_STATIC_NT) ;;
+      bp_bht1)        DEFINES+=(-DBP_BHT1)      ;;
+      bp_bht2)        DEFINES+=(-DBP_BHT2)      ;;
+      bp_gshare)      DEFINES+=(-DBP_GSHARE)    ;;
+      bp_bht2_jal)    DEFINES+=(-DBP_BHT2 -DBP_PRED_JAL) ;;
+      bp_gshare_jal)  DEFINES+=(-DBP_GSHARE -DBP_PRED_JAL) ;;
+      bp_bht2_full)   DEFINES+=(-DBP_BHT2 -DBP_PRED_JAL -DBP_RAS) ;;
+      bp_gshare_full) DEFINES+=(-DBP_GSHARE -DBP_PRED_JAL -DBP_RAS) ;;
     esac
     TOP="riscv_Core"
     SRC="$REPO_ROOT/rtl/core/riscvlong-Core.v"
