@@ -19,6 +19,19 @@ resolution, and trained on every resolved conditional branch. We evaluate:
 
 Plus `baseline` (no predictor — the unmodified Lab RTL) for reference.
 
+Both proposal stretch goals are also implemented (each as a separate define
+that layers on top of any direction predictor):
+
+- `BP_PRED_JAL` — predict JAL at F using the deterministic
+  `pc + imm_uj` target. Saves the 1-cycle D-stage redirect per JAL.
+- `BP_RAS` — 8-deep Return Address Stack. JAL/JALR with `rd == x1`
+  pushes pc+4; JALR with `rs1 == x1` and `rd != x1` pops and uses
+  the top as the predicted target. Suppresses the redundant D-stage
+  redirect when the prediction matches actual.
+
+The `bp_bht2_full` and `bp_gshare_full` build variants combine
+direction prediction + JAL prediction + RAS for the final design point.
+
 We measure functional correctness (43 RISC-V assembly tests + 4 ubmark
 microbenchmarks) and IPC across all five configurations using a
 Verilator-based RTL simulator. FPGA synthesis (Vivado on a Nexys-4 DDR /
@@ -124,10 +137,10 @@ variant.
 
 ## Headline results (RTL simulation)
 
-All 43 assembly tests pass on all 5 variants — the predictor integration
-preserves architectural correctness in every configuration.
+All 43 assembly tests pass on all 9 variants (387 / 387) — the predictor
+integration preserves architectural correctness in every configuration.
 
-ubmark IPC (higher is better):
+ubmark IPC (higher is better) for the 5 primary variants:
 
 | Benchmark           | baseline | static_nt | bht1   | bht2   | gshare |
 |---------------------|---------:|----------:|-------:|-------:|-------:|
@@ -135,18 +148,25 @@ ubmark IPC (higher is better):
 | ubmark-cmplx-mult   | 0.747    | 0.747     | 0.912  | 0.912  | 0.902  |
 | ubmark-bin-search   | 0.715    | 0.715     | 0.813  | 0.821  | 0.780  |
 | ubmark-masked-filter| 0.682    | 0.682     | 0.924  | 0.922  | 0.922  |
+| **mean**            | **0.711**| **0.711** | **0.910**| **0.912**| **0.893** |
 
-Mispredict count (lower is better):
+With both proposal stretch goals enabled (JAL prediction + RAS):
 
-| Benchmark           | bht1 | bht2 | gshare | total branches |
-|---------------------|-----:|-----:|-------:|---------------:|
-| ubmark-vvadd        |    7 |    7 |     31 |            400 |
-| ubmark-cmplx-mult   |    6 |    6 |     25 |            600 |
-| ubmark-bin-search   |   64 |   57 |     94 |            276 |
-| ubmark-masked-filter|   72 |   82 |     85 |           1868 |
+| Benchmark           | bht2_full | gshare_full |
+|---------------------|----------:|------------:|
+| ubmark-vvadd        | 0.992     | 0.967       |
+| ubmark-cmplx-mult   | 0.912     | 0.902       |
+| ubmark-bin-search   | 0.845     | 0.802       |
+| ubmark-masked-filter| 0.922     | 0.922       |
+| **mean**            | **0.918** | **0.898**   |
 
-See `docs/REPORT.md` for analysis, FPGA area/Fmax tradeoffs, and the
-two-dimensional performance/area discussion.
+The biggest single win is `vvadd` (baseline 0.699 → BHT-2 0.991, +42%
+IPC). The biggest impact of the JAL stretch goal is `bin-search`
+(BHT-2 0.821 → BHT-2+JAL 0.845, +2.9% from removing the 1-cycle JAL
+redirect on its 41 function calls).
+
+See `docs/REPORT.md` for analysis, parameter sweeps, FPGA area/Fmax
+tradeoffs, and the two-dimensional performance/area discussion.
 
 ## Scope clarification
 
