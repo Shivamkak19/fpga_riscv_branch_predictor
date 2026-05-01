@@ -1,0 +1,50 @@
+#!/bin/bash
+
+if [ ! -d "dep" ]; then
+  mkdir dep
+fi
+
+if [ ! -d "obj" ]; then
+  mkdir obj
+fi
+
+if [ ! -d "bin" ]; then
+  mkdir bin
+fi
+
+if [ ! -d "dump" ]; then
+  mkdir dump
+fi
+
+if [ ! -d "vmh" ]; then
+  mkdir vmh
+fi
+
+mv ubmark* bin/
+mv bin/ubmark*.* dep/
+mv dep/ubmark-config.h .
+mv dep/ubmark.mk .
+mv *.a dep/
+mv dep/ubmark*.o obj/
+for x in bin/*;do
+    gp=$(riscv64-unknown-elf-readelf -s $x | grep __global_pointer | awk '{print $2}')
+    if [ -z "$gp" ]; then
+      echo "ERROR: __global_pointer missing in $x"
+      exit 1
+    fi
+    gp=$((16#$gp))
+    gp_hi=$(( (gp + 0x800) >> 12 ))
+    gp_lo=$(( gp & 0xfff ))
+    gp_lui=$(printf "%08x" $(( 0x000001b7 | (gp_hi << 12) )) | tac -rs .. | tr -d '\n')
+    gp_addi=$(printf "%08x" $(( 0x00018193 | (gp_lo << 20) )) | tac -rs .. | tr -d '\n')
+    riscv32-unknown-elf-objdump -sz --section=.text --section=.data --section=.sdata --section=.xcpthandler --section=.init --section=.fini --section=.ctors --section=.dtors --section=.eh_frame --section=.jcr --section=.sbss --section=.bss --section=.rodata $x > $x.dump
+    sed -i '/.text/ i\
+  Inserted tag: bootstrap:\
+  \ 80000 37110000 '$gp_lui' '$gp_addi' b7020100  7..........#....\
+  \ 80010 9382420b 67800200 13000000 13000000  ..B.g...........\
+  \
+    ' $x.dump
+    python ../scripts/objdump2vmh.py $x.dump > $x.vmh;
+done
+mv bin/*.dump dump/
+mv bin/*.vmh vmh/

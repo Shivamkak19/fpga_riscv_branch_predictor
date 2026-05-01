@@ -1,0 +1,60 @@
+# Build outputs
+sim/build/
+benchmarks/build/
+
+# Per-test build/run logs (regenerable; may contain absolute paths)
+results/*/riscv-*.log
+results/*/riscv-*.log.build
+results/*/ubmark-*.log
+results/*/ubmark-*.log.build
+results/*_run.log
+results/build_*.log
+
+# autotools detritus
+benchmarks/tests/autom4te.cache/
+benchmarks/ubmark/autom4te.cache/
+
+# Verilator artifacts that may leak elsewhere
+*.cpp~
+obj_dir/
+*.vcd
+*.fst
+
+# RTL backups from the type-rename workaround
+*.bak
+*.bak2
+
+# Vivado run dirs (when synthing locally)
+fpga/runs/
+*.jou
+*.log
+*.str
+*.pb
+*.dcp
+*.bit
+*.ltx
+.Xil/
+fpga/.Xil/
+xsim.dir/
+webtalk*.xml
+
+# Don't ever commit secrets
+secrets.txt
+*.pem
+*.key
+.env
+.envrc
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Editor noise
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.pyc
