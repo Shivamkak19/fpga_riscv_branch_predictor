@@ -4,9 +4,14 @@
 Outputs results/plots/{ipc.png, mispredict_rate.png, summary.md} from the
 per-variant TSVs the run scripts produce. Pure stdlib + matplotlib.
 
-Usage: ./scripts/plot_results.py
+Usage: ./scripts/plot_results.py [--source yosys|vivado]
+
+  --source yosys   (default) area axis = results/yosys_summary.tsv cell counts
+  --source vivado  area axis = results/vivado_summary.tsv slice_luts; also
+                   renders fmax.png and ipc_per_mhz.png
 """
 
+import argparse
 import csv
 import os
 import sys
@@ -19,6 +24,10 @@ try:
 except ImportError:
     print("matplotlib not installed; pip3 install matplotlib", file=sys.stderr)
     sys.exit(1)
+
+_ap = argparse.ArgumentParser()
+_ap.add_argument("--source", choices=["yosys", "vivado"], default="yosys")
+ARGS = _ap.parse_args()
 
 REPO = Path(__file__).resolve().parents[1]
 RESULTS = REPO / "results"
@@ -138,37 +147,59 @@ with open(OUT / "summary.md", "w") as f:
         f.write(f"| {b} | " + " | ".join(cells) + " |\n")
 print("wrote", OUT / "summary.md")
 
-# --- Synth comparison: yosys cell counts per variant ---
-synth_tsv = RESULTS / "yosys_summary.tsv"
+# --- Synth comparison ---
+def _to_int(s):
+    try:
+        return int(float(s))
+    except (ValueError, TypeError):
+        return 0
+
+
+def _to_float(s):
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return 0.0
+
+
+if ARGS.source == "vivado":
+    synth_tsv = RESULTS / "vivado_summary.tsv"
+    panel_keys = ("slice_luts", "slice_regs", "bram_tile")
+    panel_titles = ("Slice LUTs", "Slice Registers", "BRAM tiles")
+    panel_colors = ("tab:blue", "tab:red", "tab:purple")
+    area_key = "slice_luts"
+    area_label = "Vivado Slice LUTs (post-impl)"
+    suptitle = "Vivado post-implementation utilization (Artix-7 xc7a100t) by variant"
+else:
+    synth_tsv = RESULTS / "yosys_summary.tsv"
+    panel_keys = ("cells", "LUTs", "FFs")
+    panel_titles = ("Total cells", "LUTs (sum LUT1-6)", "FFs (FDRE+FDSE)")
+    panel_colors = ("tab:blue", "tab:green", "tab:red")
+    area_key = "cells"
+    area_label = "yosys cell count (relative area)"
+    suptitle = "yosys synth_xilinx (xc7) cell counts by variant — relative comparison"
+
 if synth_tsv.exists():
     with open(synth_tsv) as f:
         rows = list(csv.DictReader(f, delimiter="\t"))
     if rows:
         labels = [VARIANT_LABEL.get(r["variant"], r["variant"]) for r in rows]
-        cells = [int(r["cells"]) if r["cells"].isdigit() else 0 for r in rows]
-        luts  = [int(r["LUTs"])  if r["LUTs"].isdigit()  else 0 for r in rows]
-        ffs   = [int(r["FFs"])   if r["FFs"].isdigit()   else 0 for r in rows]
+        panels = [[_to_int(r.get(k, "0")) for r in rows] for k in panel_keys]
 
         fig, axes = plt.subplots(1, 3, figsize=(13, 4))
-        for ax, vals, title, color in [
-            (axes[0], cells, "Total cells",       "tab:blue"),
-            (axes[1], luts,  "LUTs (sum LUT1-6)", "tab:green"),
-            (axes[2], ffs,   "FFs (FDRE+FDSE)",   "tab:red"),
-        ]:
+        for ax, vals, title, color in zip(axes, panels, panel_titles, panel_colors):
             ax.bar(labels, vals, color=color)
             ax.set_title(title)
             ax.tick_params(axis="x", labelrotation=20)
             ax.grid(axis="y", linestyle=":", alpha=0.6)
             for i, vv in enumerate(vals):
                 ax.text(i, vv, f"{vv}", ha="center", va="bottom", fontsize=8)
-        fig.suptitle("yosys synth_xilinx (xc7) cell counts by variant — relative comparison", fontsize=11)
+        fig.suptitle(suptitle, fontsize=11)
         plt.tight_layout()
         plt.savefig(OUT / "synth_area.png", dpi=130)
         plt.close()
         print("wrote", OUT / "synth_area.png")
 
-        # IPC vs area scatter
-        # Use mean IPC across the 4 ubmarks for each variant
         mean_ipc = {}
         for v in VARIANTS:
             xs_ = [float(data[b][v]["ipc"]) for b in benches if v in data[b]]
@@ -179,15 +210,51 @@ if synth_tsv.exists():
             color = cmap(i % 10)
             v = r["variant"]
             mip = mean_ipc.get(v, 0)
-            cl = int(r["cells"]) if r["cells"].isdigit() else 0
+            cl = _to_int(r.get(area_key, "0"))
             ax.scatter(cl, mip, s=120, color=color, edgecolor="black", zorder=3)
             ax.annotate(lbl, (cl, mip), xytext=(8, 5), textcoords="offset points")
-        ax.set_xlabel("yosys cell count (relative area)")
+        ax.set_xlabel(area_label)
         ax.set_ylabel("mean IPC across 4 ubmarks")
-        ax.set_title("Performance vs area: IPC per cell")
+        ax.set_title("Performance vs area: IPC per LUT" if ARGS.source == "vivado"
+                     else "Performance vs area: IPC per cell")
         ax.grid(linestyle=":", alpha=0.5)
         ax.set_ylim(0.65, 1.0)
         plt.tight_layout()
         plt.savefig(OUT / "ipc_vs_area.png", dpi=130)
         plt.close()
         print("wrote", OUT / "ipc_vs_area.png")
+
+        if ARGS.source == "vivado":
+            fmax_vals = [_to_float(r.get("fmax_mhz", "0")) for r in rows]
+            fig, ax = plt.subplots(figsize=(10, 4.5))
+            bars = ax.bar(labels, fmax_vals, color="tab:orange")
+            ax.set_ylabel("Achieved Fmax (MHz)")
+            ax.set_title("Vivado timing closure: achieved Fmax by variant")
+            ax.tick_params(axis="x", labelrotation=20)
+            ax.grid(axis="y", linestyle=":", alpha=0.6)
+            for i, v_ in enumerate(fmax_vals):
+                ax.text(i, v_, f"{v_:.1f}", ha="center", va="bottom", fontsize=8)
+            plt.tight_layout()
+            plt.savefig(OUT / "fmax.png", dpi=130)
+            plt.close()
+            print("wrote", OUT / "fmax.png")
+
+            fig, ax = plt.subplots(figsize=(9, 5.5))
+            for i, (r, lbl) in enumerate(zip(rows, labels)):
+                color = cmap(i % 10)
+                v = r["variant"]
+                mip = mean_ipc.get(v, 0)
+                fmax = _to_float(r.get("fmax_mhz", "0"))
+                ips = mip * fmax
+                ax.scatter(_to_int(r.get("slice_luts", "0")), ips,
+                           s=120, color=color, edgecolor="black", zorder=3)
+                ax.annotate(lbl, (_to_int(r.get("slice_luts", "0")), ips),
+                            xytext=(8, 5), textcoords="offset points")
+            ax.set_xlabel("Vivado Slice LUTs")
+            ax.set_ylabel("mean MIPS  (mean_IPC × Fmax_MHz)")
+            ax.set_title("True performance/area: MIPS vs LUTs (Fmax-corrected)")
+            ax.grid(linestyle=":", alpha=0.5)
+            plt.tight_layout()
+            plt.savefig(OUT / "mips_vs_area.png", dpi=130)
+            plt.close()
+            print("wrote", OUT / "mips_vs_area.png")

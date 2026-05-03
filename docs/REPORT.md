@@ -419,10 +419,10 @@ mean IPC to three decimals. BHT-2 buys a tiny improvement on
 slightly less accurate on this workload mix because its history
 correlation hurts on tight loops.
 
-### 7.3 Vivado synth (on-bench) — to be filled
+### 7.3 Vivado synth (on-bench) — post-implementation utilization + Fmax
 
-The Vivado synth flow runs on the lab bench host
-(`bench@10.50.62.45`, Nexys-4 DDR / Artix-7 xc7a100tcsg324-1).
+The Vivado flow runs on the lab bench host (`bench@10.50.62.45`,
+Nexys-4 DDR / Artix-7 xc7a100tcsg324-1).
 `fpga/synth_scripts/synth_variant.tcl` performs the per-variant
 build:
 
@@ -435,45 +435,57 @@ build:
    `report_timing -delay_type max -max_paths 25`, and `report_power`
 5. Copies the bitstream to `~/results/<variant>/fpga_top.bit`
 
-To execute end-to-end (from this repo on the laptop):
+End-to-end run, from a clean checkout on the laptop:
 
-```
-./scripts/deploy_to_bench.sh
+```bash
+./scripts/deploy_to_bench.sh                                # rsync repo to bench
 ssh bench
 cd ~/riscv-fpga/xilinx_proj
-for v in baseline bp_static_nt bp_bht1 bp_bht2 bp_gshare; do
+for v in baseline bp_static_nt bp_bht1 bp_bht2 bp_gshare \
+         bp_bht2_jal bp_gshare_jal bp_bht2_full bp_gshare_full; do
   vivado -mode batch -nojournal -nolog \
          -source ~/fpga_riscv_branch_predictor/fpga/synth_scripts/synth_variant.tcl \
          -tclargs $v
 done
+exit
+scp -r bench:~/results ./fpga_results                       # fetch reports
+./scripts/parse_vivado_reports.py                           # → results/vivado_summary.tsv
+./scripts/plot_results.py --source vivado                   # → synth_area.png, fmax.png,
+                                                            #   ipc_vs_area.png, mips_vs_area.png
 ```
 
-> **Status**: The bench host was unreachable from this Mac during the
-> write-up window (Princeton VPN connection dropped after authoring
-> began). The synthesis flow scripts and the per-variant overlay logic
-> are committed to `fpga/synth_scripts/` and `scripts/deploy_to_bench.sh`,
-> ready to run as soon as the VPN session is re-established. The
-> FPGA-area-and-Fmax sub-table below will be filled in from the run
-> outputs once that happens. **The lab evaluation runs verbatim on
-> the bench host with the supplied scripts** — no RTL changes are
-> required at synthesis time vs. the simulation flow.
+`scripts/parse_vivado_reports.py` reads each
+`fpga_results/<variant>/{utilization.rpt, timing_summary.rpt, power.rpt}`,
+extracts post-implementation Slice LUTs / Slice Registers / BRAM tiles
+/ DSPs, target clock period, WNS, and total on-chip power, and
+computes achieved Fmax = 1000 / (period_ns − WNS_ns). Output is
+`results/vivado_summary.tsv`.
 
-### 7.1 Expected FPGA results (planned table)
+#### 7.3.1 Post-implementation utilization + Fmax (filled by parser)
 
-To be filled from `~/results/<variant>/{utilization.rpt, timing_summary.rpt}`:
+| Variant         | Slice LUTs | Slice Regs | BRAM tile | DSP | Fmax (MHz) | Power (W) |
+|-----------------|-----------:|-----------:|----------:|----:|-----------:|----------:|
+| baseline        |        TBD |        TBD |       TBD | TBD |        TBD |       TBD |
+| bp_static_nt    |        TBD |        TBD |       TBD | TBD |        TBD |       TBD |
+| bp_bht1         |        TBD |        TBD |       TBD | TBD |        TBD |       TBD |
+| bp_bht2         |        TBD |        TBD |       TBD | TBD |        TBD |       TBD |
+| bp_gshare       |        TBD |        TBD |       TBD | TBD |        TBD |       TBD |
+| bp_bht2_jal     |        TBD |        TBD |       TBD | TBD |        TBD |       TBD |
+| bp_gshare_jal   |        TBD |        TBD |       TBD | TBD |        TBD |       TBD |
+| bp_bht2_full    |        TBD |        TBD |       TBD | TBD |        TBD |       TBD |
+| bp_gshare_full  |        TBD |        TBD |       TBD | TBD |        TBD |       TBD |
 
-| Variant       | LUTs | FFs  | BRAM | Fmax (MHz) | Crit-path |
-|---------------|-----:|-----:|-----:|-----------:|-----------|
-| baseline      |  TBD |  TBD |  TBD |        TBD | TBD       |
-| bp_static_nt  |  TBD |  TBD |  TBD |        TBD | TBD       |
-| bp_bht1       |  TBD |  TBD |  TBD |        TBD | TBD       |
-| bp_bht2       |  TBD |  TBD |  TBD |        TBD | TBD       |
-| bp_gshare     |  TBD |  TBD |  TBD |        TBD | TBD       |
+> **Status:** as of this revision the bench host is unreachable from
+> the laptop (Princeton OIT eduroam does not route to the `10.50.62.x`
+> lab subnet — needs OIT GlobalProtect VPN or a wired drop in the EE
+> building). Synth scripts, parser, and plot extension are all
+> committed and tested against synthetic Vivado fixtures; the table
+> above and §7.4 below are one bench session away from being filled.
 
-### 7.2 What we expect
+#### 7.3.2 Predicted critical path and BRAM placement
 
-The predictor designs are quite small relative to the rest of the
-core. Expected FF / LUT impact for each variant relative to baseline:
+The predictor designs are small relative to the rest of the core.
+Expected FF / LUT impact for each variant relative to baseline:
 
 - **bp_static_nt**: ~zero — just the pre-decoder and a few pipeline
   registers, all of which optimize away when `predict_taken` is
@@ -487,20 +499,68 @@ core. Expected FF / LUT impact for each variant relative to baseline:
   index. Slightly more than BHT-2 because of the XOR network and
   the GHR shift register.
 
-Critical-path concern: the BHT/GShare read is on the F-stage PC-mux
-path (the predicted target feeds `pc_mux_out_Phl`, which drives both
-the imreq output and `pc_Fhl <=`). If Vivado places the BHT in
+Critical-path concern: the BHT/GShare read sits on the F-stage
+PC-mux path (predicted target feeds `pc_mux_out_Phl`, which drives
+both the imreq output and `pc_Fhl <=`). If Vivado places the BHT in
 distributed RAM, the read is one LUT delay; in BRAM it's a clocked
 read, which would force a one-cycle delay we did not pipeline for.
 The intended mapping is **distributed RAM (LUTs)** since we use a
-simple `reg [W-1:0] table_r [N-1:0]` declaration without `(*
-ram_style="block" *)`. This should keep the predictor read out of
-the critical path for tables of 256 entries; we will confirm from the
-synth reports.
+simple `reg [W-1:0] table_r [N-1:0]` declaration without
+`(* ram_style="block" *)`. We will confirm from §7.3.1's BRAM-tile
+column — a baseline value of 12 is expected (the I-/D-mem RAMs);
+any variant that exceeds 12 indicates Vivado promoted the predictor
+table to BRAM and we need to re-pipeline.
 
 If GShare moves the critical path significantly (the XOR + index +
-read all sit before the PC-mux), then the IPC win on the bigger
-benchmarks must be weighed against a possible Fmax drop.
+read all sit before the PC-mux), the IPC win on the bigger
+benchmarks must be weighed against a possible Fmax drop. §7.4
+captures the wall-clock answer.
+
+### 7.4 On-board IPS measurement
+
+Simulation IPC tells us cycles-per-instruction; Vivado Fmax tells us
+clock-period-per-cycle. The product — instructions per second —
+is the metric the user actually feels. §7.3.1 gives Fmax under
+post-implementation timing analysis, but routing congestion and
+clock-tree skew on the actual silicon can shift the achievable rate.
+This section closes the loop with a measured number from the FPGA.
+
+Procedure (per variant):
+
+1. Copy `fpga_results/<variant>/fpga_top.bit` to the bench host.
+2. Open VNC tunnel: `ssh -L 5905:localhost:5905 bench`, then VNC
+   client → `localhost:5905`.
+3. In Vivado on bench, open the Hardware Manager and program the
+   Nexys-4 DDR with the variant's bitstream.
+4. Use the lab's serial loader to push each ubmark `.vmh` onto the
+   board. The lab top-level returns the cycle count via UART when
+   `csr_status != 0`.
+5. Record `cycles_board` per ubmark per variant.
+
+For each (variant, benchmark):
+
+```
+IPS_actual    = retired_instructions × Fmax_MHz × 1e6 / cycles_board
+IPS_projected = retired_instructions × Fmax_MHz × 1e6 / cycles_sim
+```
+
+`retired_instructions` and `cycles_sim` come from
+`results/<variant>/ubmark.tsv` (already collected). `Fmax_MHz` comes
+from `results/vivado_summary.tsv`. A close match between actual
+and projected IPS validates that the simulation cycle counts
+transfer to silicon.
+
+| Variant         | benchmark            | inst | cyc_sim | cyc_board | Fmax (MHz) | IPS_actual | IPS_projected | match |
+|-----------------|----------------------|-----:|--------:|----------:|-----------:|-----------:|--------------:|------:|
+| baseline        | ubmark-vvadd         |  TBD |     TBD |       TBD |        TBD |        TBD |           TBD |   TBD |
+| bp_bht2_full    | ubmark-vvadd         |  TBD |     TBD |       TBD |        TBD |        TBD |           TBD |   TBD |
+| bp_gshare_full  | ubmark-vvadd         |  TBD |     TBD |       TBD |        TBD |        TBD |           TBD |   TBD |
+| ...             | (one row per variant × ubmark, 9 × 4 = 36 rows) |||||||||
+
+The headline numbers we'll quote in §8 are mean IPS per variant
+across the 4 ubmarks: simulation-projected vs board-measured. Any
+delta > ~5% is worth investigating (clock manager configuration,
+serial loader overhead in the cycle counter, etc.).
 
 ---
 

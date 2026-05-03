@@ -1,7 +1,8 @@
 # PROGRESS — handoff for the next session
 
-**Last updated:** 2026-05-01 (early morning local; user heading back to
-Princeton later in the day, then VPN will be reachable)
+**Last updated:** 2026-05-03 (campus session; bench host was
+reachable at TCP layer via GP but sshd hung at banner exchange — see
+"Session 2 status" below for the diagnosis)
 
 **Working directory:** `/Users/shiva/Desktop/courses/f25/s26/ece475/project/fpga_riscv_branch_predictor`
 **GitHub:** https://github.com/Shivamkak19/fpga_riscv_branch_predictor (private)
@@ -19,9 +20,13 @@ simulation sweep passes (387/387 asm tests, 36/36 ubmark runs across 9
 variants); local yosys synth done for relative cell-count comparison;
 report drafted with all sim numbers and Pareto analysis.
 
-**Blocked on:** Princeton VPN reconnect → Vivado synth on bench →
-on-board IPS measurement. ~1 hour of FPGA work, all scripted, runs
-unattended.
+**Blocked on:** bench-host sshd is accepting TCP but never sending
+its SSH banner (verified from a working GP session on 2026-05-03 —
+see "Session 2 status"). Once bench is power-cycled or its sshd
+unsticks, the FPGA leg is one command sequence: `deploy → for-loop
+synth → scp → parser → plotter`. The parser, plot extension, and
+report stubs landed this session, so the only outstanding work is
+the actual Vivado batch run + on-board IPS capture.
 
 ---
 
@@ -317,10 +322,98 @@ f0875b6 Initial commit: branch predictor design exploration for riscvlong
 
 ---
 
+## Session 2 status (2026-05-03)
+
+### What got done this session
+- **Verified local toolchain**: full clean rebuild + 43-test asm
+  sweep on `bp_bht2_full` → 43/0/0. Toolchain is fine.
+- **Wrote `scripts/parse_vivado_reports.py`** — reads
+  `fpga_results/<variant>/{utilization.rpt,timing_summary.rpt,power.rpt}`,
+  extracts Slice LUTs / Slice Regs / BRAM tile / DSP / target period /
+  WNS / power, computes Fmax = 1000 / (period − WNS), writes
+  `results/vivado_summary.tsv`. Validated end-to-end against a
+  hand-built Vivado-format fixture: regex tolerates both
+  `WNS(ns) ...` and `| WNS(ns) ...` forms (Vivado switches between
+  boxed and unboxed table styles across sections); fixture parsed to
+  4231 LUTs / 1452 regs / 12 BRAM / 4 DSP / Fmax 130.63 MHz / 0.234 W.
+- **Extended `scripts/plot_results.py`** with `--source {yosys,vivado}`.
+  Vivado mode reads the new TSV and re-renders `synth_area.png` (Slice
+  LUTs / Slice Regs / BRAM tile panels), `ipc_vs_area.png` (against
+  Slice LUTs), plus two new charts: `fmax.png` (per-variant achieved
+  MHz bar chart) and `mips_vs_area.png` (the Fmax-corrected Pareto —
+  mean_IPC × Fmax plotted against Slice LUTs, which is the only
+  honest "performance per area" view). Yosys mode unchanged.
+- **REPORT.md rewrites:** §7.3 was "to be filled" — replaced with a
+  9-row utilization+timing+power table skeleton, named the parser/
+  plot pipeline explicitly, fixed the duplicate §7.1/§7.2 numbering
+  bug (those were renumbered to §7.3.1 / §7.3.2). Added new §7.4
+  "On-board IPS measurement" with full methodology, the formula
+  `IPS = retired_inst × Fmax_MHz × 1e6 / cycles`, and a 36-row TBD
+  table (9 variants × 4 ubmarks).
+
+### What we learned about the network situation
+- **GlobalProtect IS the `utun4 / 172.20.x.x` interface** — Princeton's
+  GP gateway hands out addresses in `172.20.x.x` private space.
+  Earlier sessions (and the start of this one) misread that as
+  Anthropic Tailscale. There is no Tailscale running on this Mac
+  (no `tailscaled` process, no launchd entry — only PaloAlto's
+  `pangps` and `pangpa` daemons).
+- **Princeton OIT eduroam alone does NOT route to the `10.50.62.x`
+  lab subnet.** Even on campus, you still need GP up. Confirmed by
+  watching the route to `10.50.62.45` flip from "no route" to
+  "via utun4" the moment GP connected.
+- **Bench-side sshd is the current blocker.** With GP up, TCP to
+  port 22 succeeds in <1 sec (`nc -zv` reports "succeeded"), and
+  other ports actively `refused` (RST) — proving the host is up and
+  the GP routing is correct. But sshd accepts the TCP connection
+  and then **never sends its banner**: `ssh -vvv` gets to "Connection
+  established / Local version string SSH-2.0-OpenSSH_9.4" then dies
+  at "Connection timed out during banner exchange" 15 seconds later.
+  Manual `nc 10.50.62.45 22` reads zero bytes over 5 seconds. A 30-
+  second pause before retry didn't unstick it.
+- **Most likely cause:** the cluster of failed `ssh-copy-id`
+  attempts during the first session triggered fail2ban or sshd's
+  `MaxStartups` to silently drop subsequent connections from this
+  source. Less likely: sshd has a stuck child blocking accepts.
+  Either way, the fix is **a power-cycle of bench** (physical lab
+  visit, ~2 min) or **wait it out** (10 min for default fail2ban,
+  potentially much longer if the lab tuned the ban window up).
+
+### Recovery sequence (once bench is unstuck)
+
+```bash
+cd /Users/shiva/Desktop/courses/f25/s26/ece475/project/fpga_riscv_branch_predictor
+
+# 1. Confirm bench answers
+ssh -o ConnectTimeout=10 -o BatchMode=yes bench 'echo OK; hostname'
+
+# 2. Push repo + run all 9 Vivado synths (~1h unattended on bench)
+./scripts/deploy_to_bench.sh
+ssh bench 'cd ~/riscv-fpga/xilinx_proj && \
+  for v in baseline bp_static_nt bp_bht1 bp_bht2 bp_gshare \
+           bp_bht2_jal bp_gshare_jal bp_bht2_full bp_gshare_full; do \
+    vivado -mode batch -nojournal -nolog \
+      -source ~/fpga_riscv_branch_predictor/fpga/synth_scripts/synth_variant.tcl \
+      -tclargs $v ; \
+  done'
+
+# 3. Pull reports, parse, plot
+scp -r bench:~/results ./fpga_results
+./scripts/parse_vivado_reports.py            # → results/vivado_summary.tsv
+./scripts/plot_results.py --source vivado    # → synth_area / fmax / mips_vs_area / ipc_vs_area
+
+# 4. On-board IPS capture (interactive, ~30 min via VNC):
+ssh -L 5905:localhost:5905 bench   # then VNC client → localhost:5905
+# In Vivado HW Manager, program each variant's fpga_top.bit and read
+# cycle counts via UART per ubmark. Numbers go into REPORT §7.4.
+```
+
+---
+
 ## What's left
 
 ### A. Vivado synth on bench (~1 hour, all 9 variants)
-**Blocker:** Princeton VPN.
+**Blocker:** bench sshd hung — see Session 2 status above.
 
 The script that drives this is `fpga/synth_scripts/synth_variant.tcl`.
 For each variant it (1) overlays the variant's RTL into the lab tree on
@@ -354,17 +447,20 @@ That gives, per variant: `utilization.rpt`, `timing_summary.rpt`,
 `timing_paths.rpt`, `power.rpt`, plus the bitstream `fpga_top.bit`.
 
 **TODO after that:**
-- Parse the Vivado utilization + timing reports into a TSV (a tiny
-  python or awk script — pull "CLB LUTs", "CLB Registers", "Block
-  RAM Tile", and "WNS / Slack" from the rpt files).
-- Fill in the table in `docs/REPORT.md` §7.3 and update the
-  IPC-vs-area scatter to use Vivado cell counts instead of yosys.
-- Update REPORT §8 if the Vivado Fmax data changes the
-  performance-per-area conclusion (currently BHT-2 full wins; could
-  shift if e.g. GShare's XOR network drops Fmax noticeably).
+- ~~Parse the Vivado utilization + timing reports into a TSV~~ —
+  **done in session 2**: `scripts/parse_vivado_reports.py`.
+- ~~Update the IPC-vs-area scatter to use Vivado cell counts instead
+  of yosys~~ — **done in session 2**: `scripts/plot_results.py
+  --source vivado` plots LUT-based area + adds `fmax.png` and
+  `mips_vs_area.png` (the Fmax-corrected Pareto).
+- Fill in the table in `docs/REPORT.md` §7.3.1 from
+  `results/vivado_summary.tsv` (table skeleton already in place).
+- Update REPORT §8 if the Vivado Fmax data changes the performance-
+  per-area conclusion (currently BHT-2 full wins; could shift if
+  GShare's XOR network drops Fmax noticeably).
 
 ### B. On-board IPS measurement (~30 minutes)
-**Blocker:** same VPN; also needs Vivado bitstreams from §A.
+**Blocker:** same as §A; also needs Vivado bitstreams from §A.
 
 Once each variant's `fpga_top.bit` is in `fpga_results/<variant>/`:
 1. Open VNC tunnel: `ssh -L 5905:localhost:5905 bench`, then VNC to
@@ -376,17 +472,19 @@ Once each variant's `fpga_top.bit` is in `fpga_results/<variant>/`:
 4. Combine: actual IPS = (instructions retired) × (Vivado-reported
    Fmax) ÷ (cycles measured on board).
 5. Compare actual IPS to the simulation-projected IPS — should match.
-6. Record numbers in REPORT §7.4 (new subsection — needs to be added).
+6. Record numbers in REPORT §7.4 (subsection + 36-row TBD table
+   already in place from session 2 — just fill the cells).
 
 ### C. Final report polish
 Once §A and §B are filled in:
-- Replace the §7.3 placeholder table with real Vivado numbers.
-- Update §8 Pareto picture if the Vivado-vs-yosys cell count
-  breakdown shifts the conclusion.
-- Add a §7.4 "On-board IPS measurement" subsection.
-- Re-render `ipc_vs_area.png` against Vivado utilization (the script
-  reads `results/yosys_summary.tsv`; either point it at a new
-  `vivado_summary.tsv` or just hand-edit the chart for the report).
+- Fill `docs/REPORT.md` §7.3.1 (utilization+Fmax+power table) and
+  §7.4 (on-board IPS table) from the TSVs.
+- Update §8 Pareto picture if the Vivado Fmax data shifts the
+  performance-per-area conclusion.
+- ~~Add a §7.4 "On-board IPS measurement" subsection~~ — **done in
+  session 2** (just needs filling).
+- ~~Re-render `ipc_vs_area.png` against Vivado utilization~~ —
+  **done in session 2**: `plot_results.py --source vivado`.
 - Optional: a brief discussion of how the lab/test mix limits what
   GShare can show (correlated benchmarks would change the picture).
 
