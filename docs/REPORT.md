@@ -79,9 +79,12 @@ conditional branch incurs this 2-cycle penalty even when the program
 takes the same branch direction every iteration.
 
 The static cost shows up most plainly in `ubmark-vvadd`, a tight loop
-over 100 elements. With 397 of 400 conditional branches taken, the
-baseline loses `397 × 2 = 794 cycles` to refetch — about 30% of total
-runtime. The opportunity for a predictor is large.
+over 100 elements. Built with `-O3 -funroll-loops` (matching lab4),
+the baseline retires 1028 instructions in 1379 cycles (IPC 0.745); of
+the 139 dynamic conditional branches, 130 are taken — `130 × 2 ≈ 260
+cycles` lost to refetch, or ~19% of total runtime. The opportunity
+for a predictor is real but bounded by the unrolled inner loops
+having relatively few branches per element.
 
 ---
 
@@ -297,20 +300,61 @@ The four ubmark binaries — `vvadd`, `cmplx-mult`, `bin-search`,
 the predictor far more meaningfully than the assembly tests (whose
 branches mostly use unique PCs and never repeat).
 
+### 6.0 Methodology — alignment with lab4
+
+The ubmark sources, compile flags, and cycle-counting policy below
+match `l4/lab4/build` so the per-benchmark `*-long.out` files in
+`results/<variant>/` are directly diffable against the lab4 reference:
+
+- **Sources**: `benchmarks/ubmark/ubmark/ubmark-{vvadd,cmplx-mult,bin-search,masked-filter}.c`
+  are character-for-character copies of `l4/lab4/ubmark/ubmark/ubmark-*.c`.
+- **Compile flags**: `-march=rv32im_zicsr -mabi=ilp32 -O3 -funroll-loops`
+  via `riscv64-unknown-elf-gcc 15.2.0` (the gcc shipped under
+  `/home/ECE475/local/encap/riscv-gnu-toolchain-2026.2.13`), matching
+  lab4's `ubmark.mk`.
+- **Counters**: the testbench reads `proc.ctrl.num_cycles` and
+  `proc.ctrl.num_inst` directly out of the DUT, the same registers
+  lab4's `riscvlong-sim.v` reports. They are gated by
+  `(stats_en || csr_stats)`; with `+stats=1` we force `stats_en = 1`
+  exactly the way lab4 does, so cycle/instruction counts are
+  whole-program (not kernel-only).
+- **Output format**: each ubmark log is also copied to
+  `results/<variant>/<bench>-long.out`, named identically to
+  `l4/lab4/build/<bench>-long.out`.
+
+For sanity, here is `baseline / ubmark-vvadd` against lab4's reference:
+
+| Source           | num_cycles | num_inst | ipc    |
+|------------------|-----------:|---------:|-------:|
+| this project     |       1379 |     1028 | 0.7455 |
+| `l4/lab4/build`  |       1453 |     1070 | 0.7361 |
+
+The ~5% delta is explained by minor differences in the bootstrap (lab4
+uses a hand-encoded reset vector inserted by `ubmark/convert`; we use
+`_start` in `benchmarks/startup/startup.S` that sets `sp=0x100000-16`,
+zeros `gp`, calls `main`, signals PASS via `csrw 21, 1`). The
+predictor-vs-baseline deltas reported below are computed against the
+same baseline build, so the comparison is internally consistent.
+
 ### 6.1 IPC by variant
 
 | Benchmark           | baseline | static_nt | bht1   | bht2   | gshare |
 |---------------------|---------:|----------:|-------:|-------:|-------:|
-| ubmark-vvadd        |  0.6986  |  0.6986   | 0.9914 | 0.9914 | 0.9665 |
-| ubmark-cmplx-mult   |  0.7475  |  0.7475   | 0.9116 | 0.9116 | 0.9019 |
-| ubmark-bin-search   |  0.7146  |  0.7146   | 0.8128 | 0.8208 | 0.7799 |
-| ubmark-masked-filter|  0.6819  |  0.6819   | 0.9242 | 0.9222 | 0.9216 |
-| **mean**            | **0.711** | **0.711** | **0.910** | **0.911** | **0.893** |
+| ubmark-vvadd        | 0.7455   | 0.7455    | 0.8885 | 0.8885 | 0.8545 |
+| ubmark-cmplx-mult   | 0.7369   | 0.7369    | 0.7640 | 0.7640 | 0.7556 |
+| ubmark-bin-search   | 0.7255   | 0.7255    | 0.8037 | 0.8119 | 0.7857 |
+| ubmark-masked-filter| 0.7201   | 0.7201    | 0.8449 | 0.8535 | 0.8428 |
+| **mean**            | **0.732** | **0.732** | **0.825** | **0.830** | **0.810** |
 
 The IPC ceiling is 1.0 (single-issue, single retire per cycle). The
-baseline's 0.71 mean tells us roughly 30% of cycles are lost to either
+baseline's 0.73 mean tells us roughly 27% of cycles are lost to either
 data hazards (load-use stalls, multi-cycle muldiv) or branch
-mispredicts.
+mispredicts. With `-O3 -funroll-loops`, loop bodies have far fewer
+*dynamic* branches per element than `-O2` would emit, so the headline
+IPC lift available to a predictor is smaller than under more
+branch-heavy code — but every conditional branch the predictor gets
+right still saves 2 cycles, and that's where the BHT/GShare gains
+come from.
 
 `static_nt` is identical to `baseline` because the lab core's existing
 behavior is itself "always not-taken" — fetch PC+4 and only correct on
@@ -319,13 +363,13 @@ doesn't change observable IPC. This validates that our integration
 adds zero overhead when the predictor signal is constant.
 
 The 1-bit and 2-bit BHTs give the largest IPC lift on the loop-heavy
-benchmarks: vvadd jumps from 0.70 → 0.99, eliminating essentially the
-entire branch-mispredict tax (only 7 mispredicts remain out of 400
-branches, all on cold loop entry/exit).
+benchmarks: vvadd jumps from 0.745 → 0.889, eliminating essentially
+all the loop-branch mispredict tax (only 19 mispredicts remain out
+of 139 branches, dominated by cold loop entry/exit).
 
-GShare is competitive on the larger benchmarks but slightly worse than
-BHT-2 on tight loops, especially `vvadd` (0.97 vs 0.99). The reason is
-GHR pollution: for a single-direction loop branch, the GHR cycles
+GShare is competitive on the bigger benchmarks but slightly worse than
+BHT-2 on tight loops, especially `vvadd` (0.855 vs 0.889). The reason
+is GHR pollution: for a single-direction loop branch, the GHR cycles
 through patterns of mostly-`1`s, mapping the same PC to different
 counters depending on how many other taken branches have just
 resolved. That delays warmup and doubles the warmup cost. With more
@@ -334,39 +378,43 @@ benchmarks it never beats BHT-2.
 
 `ubmark-bin-search` is the hardest benchmark for any direction
 predictor. Binary search compares against data, so each branch's
-direction is essentially uncorrelated random data. BHT-2 hits 79%
-accuracy (57 mispredicts in 276 branches), about as well as any
+direction is essentially uncorrelated random data. BHT-2 hits 76%
+accuracy (63 mispredicts in 262 branches), about as well as any
 direction predictor can do on this workload without value prediction.
-GShare actually does worse here (66% accuracy) because the GHR's
+GShare actually does worse here (67% accuracy) because the GHR's
 correlation assumption is just wrong for data-driven branches.
 
 ### 6.2 Mispredict rates
 
 | Benchmark           | branches | bht1 misp | bht2 misp | gshare misp |
 |---------------------|---------:|----------:|----------:|------------:|
-| ubmark-vvadd        |      400 |  7  (1.8%) |  7  (1.8%) | 31 ( 7.8%) |
-| ubmark-cmplx-mult   |      600 |  6  (1.0%) |  6  (1.0%) | 25 ( 4.2%) |
-| ubmark-bin-search   |      276 | 64 (23.2%) | 57 (20.7%) | 94 (34.1%) |
-| ubmark-masked-filter|     1868 | 72  (3.9%) | 82  (4.4%) | 85 ( 4.6%) |
+| ubmark-vvadd        |      139 | 19 (13.7%) | 19 (13.7%) | 42 (30.2%) |
+| ubmark-cmplx-mult   |      271 | 14  (5.2%) | 14  (5.2%) | 34 (12.5%) |
+| ubmark-bin-search   |      262 | 70 (26.7%) | 63 (24.0%) | 86 (32.8%) |
+| ubmark-masked-filter|     1170 |108  (9.2%) | 66  (5.6%) |118 (10.1%) |
 
 For comparison, every variant resolves the same number of branches per
 benchmark (predictors don't change the dynamic instruction count, only
 where the front-end is fetching from while the branch is in flight).
+The branch counts are smaller than they were under `-O2` because gcc
+15.2's `-O3 -funroll-loops` collapses many loop-back-edges into
+straight-line code.
 
 ### 6.3 Cycle-level accounting on `ubmark-vvadd`
 
 Worth a closer look because the workload is small enough to reason
 about exactly:
 
-- 400 conditional branches, 397 actually taken (`397/400 = 99.25%` taken
-  rate — a tight `for (i=0; i<size; i++)` loop)
-- baseline: `397 taken × 2 squash cycles = 794 wasted cycles`
-- baseline total: 2641 cycles for 1845 retired insts → IPC 0.699
-- bht2: 7 mispredicts × 2 cycles = 14 wasted cycles
-- bht2 total: 1861 cycles, IPC 0.991
-- delta: `2641 - 1861 = 780 cycles saved`, very close to the 794 ceiling
+- 139 conditional branches, 130 actually taken (94% taken rate — the
+  `-O3 -funroll-loops` build vectorises the body so each unrolled iter
+  runs ~1/8 the loop-back branches the `-O2` build emitted)
+- baseline: `130 taken × 2 squash cycles = 260 wasted cycles`
+- baseline total: 1379 cycles for 1028 retired insts → IPC 0.7455
+- bht2: 19 mispredicts × 2 cycles = 38 wasted cycles
+- bht2 total: 1157 cycles, IPC 0.8885
+- delta: `1379 - 1157 = 222 cycles saved`, ≈ 85% of the 260 ceiling
 
-The ~14-cycle gap from theoretical maximum is from the predictor being
+The remaining gap from theoretical maximum is from the predictor being
 cold at loop entry (the first encounter of each loop branch is
 mispredicted) and from the small bit of non-loop control flow in the
 test harness.
@@ -450,19 +498,20 @@ performance-per-area is:
 
 | Variant       | mean IPC | Δ-FFs vs base | Δ-LUTs vs base | Notes |
 |---------------|---------:|--------------:|---------------:|-------|
-| baseline      |   0.711  |             0 |              0 | reference |
-| bp_static_nt  |   0.711  |          ~few |           ~few | overhead-only |
-| bp_bht1       |   0.910  |         ~270 |         ~few   | 28% IPC lift, tiny area |
-| bp_bht2       |   0.911  |         ~520 |        ~hundreds | best mean IPC, ~2× FFs of BHT-1 |
-| bp_gshare     |   0.893  |         ~520 |        ~hundreds + XOR | worse mean IPC than BHT-2 here |
+| baseline      |   0.732  |             0 |              0 | reference |
+| bp_static_nt  |   0.732  |          ~few |           ~few | overhead-only |
+| bp_bht1       |   0.825  |         ~270 |         ~few   | +12.7% IPC lift, tiny area |
+| bp_bht2       |   0.830  |         ~520 |        ~hundreds | best base predictor, ~2× FFs of BHT-1 |
+| bp_gshare     |   0.810  |         ~520 |        ~hundreds + XOR | worse mean IPC than BHT-2 here |
 
 The interesting headline: **on this workload mix, BHT-2 is the
 performance-per-area sweet spot**. BHT-1 is half the FF count for
-within 0.1% of the IPC. GShare is slightly worse than BHT-2 in IPC
+within 0.5% of the IPC. GShare is slightly worse than BHT-2 in IPC
 *and* slightly larger in area + critical path. GShare's design
 strength — exploiting recent path correlation — doesn't pay off on
 loop-heavy microbenchmarks where the same PC always wants the same
-prediction.
+prediction. With both stretch goals on, BHT-2 full reaches 0.843 mean
+IPC for ~840 extra FFs over baseline.
 
 Without Vivado place-and-route data we can't translate IPC to
 wall-clock IPS — that conversion was the proposal's headline
@@ -479,42 +528,54 @@ critical-path delay materially.
 
 ## 9. Build & run reproducibility
 
-The committed TSVs come from a Mac laptop (Verilator 5.048,
-`riscv64-elf-gcc` 16.1.0). The same flow runs on Princeton's
-`adroit-vis.princeton.edu` cluster — see `docs/ADROIT_RUN.md` for
-the toolchain notes (Verilator 4.221, `riscv64-unknown-elf-gcc` 9.2,
-fall back to iverilog 11 since 4.221 lacks `--timing`). Both
-environments agree on functional pass/fail (387/387 asm + 36/36
-ubmark) and on the *relative* IPC ordering across variants. Absolute
-cycle counts shift slightly because gcc 9.2 emits different code
-than gcc 16.1, but BHT-2 still wins, GShare still trails BHT-2 on
-this workload, and `static_nt` is still equivalent to `baseline`.
+The committed TSVs and `results/<variant>/<bench>-long.out` files
+come from Princeton's `adroit-vis.princeton.edu` cluster, using the
+same `/home/ECE475/local/encap` toolchain pins as `l4/lab4` so the
+ubmark numbers are directly comparable to lab4's reference outputs
+(see §6.0). Pinned versions:
 
-Local re-run:
+- `riscv-gnu-toolchain-2026.2.13` → `riscv64-unknown-elf-gcc` 15.2.0
+  (accepts `-march=rv32im_zicsr`, matches lab4 `ubmark.mk`)
+- `iverilog-v12` (testbench's `always #5 clk = ~clk` and reset
+  `#delays` need a SystemVerilog scheduler; iverilog handles them
+  natively, and lab4 also targets iverilog)
+- `verilator-v5.044` (also available; `SIM_TOOL=verilator` selects it
+  for native C++ speed if you'd rather)
 
-```bash
-brew install verilator riscv64-elf-gcc icarus-verilog coreutils
-./scripts/run_all_variants.sh
-```
-
-Adroit re-run (see `docs/ADROIT_RUN.md` for full details):
+Adroit re-run from a clean checkout:
 
 ```bash
-export PATH=/home/ee475/local/encap/verilator-2022.04.26/bin:$PATH
-export RISCV_GCC=riscv64-unknown-elf-gcc \
-       RISCV_OBJDUMP=riscv64-unknown-elf-objdump \
-       RISCV_MARCH=rv32im SIM_TOOL=iverilog
+cd /scratch/network/sk3686/ece475/project/fpga_riscv_branch_predictor
+source scripts/adroit-env.sh                       # loads ECE475 toolchain
 for v in baseline bp_static_nt bp_bht1 bp_bht2 bp_gshare \
          bp_bht2_jal bp_gshare_jal bp_bht2_full bp_gshare_full; do
   ./scripts/build_sim.sh   $v
-  ./scripts/run_tests.sh   $v
-  ./scripts/run_ubmarks.sh $v
+  ./scripts/run_tests.sh   $v   # 387/387 expected
+  ./scripts/run_ubmarks.sh $v   #  36/36  expected
 done
+./scripts/plot_results.py
 ```
 
-Adroit re-run output is archived under `results/adroit/<variant>/`
-side-by-side with the laptop runs; `results/<variant>/` itself stays
-the laptop-derived primary data referenced throughout this report.
+Comparing baseline vvadd to lab4's reference output:
+
+```bash
+diff <(awk '/^ (status|num_cycles|num_inst|ipc) /' \
+            results/baseline/ubmark-vvadd-long.out) \
+     <(awk '/^ (status|num_cycles|num_inst|ipc) /' \
+            ../../l4/lab4/build/ubmark-vvadd-long.out)
+```
+
+The headline four lines match within ~5% (1379 vs 1453 cycles, 1028
+vs 1070 instructions, 0.7455 vs 0.7361 IPC). The delta is from a
+slightly different startup file — see §6.0.
+
+A laptop re-run is also possible (Verilator 5.x, `riscv64-elf-gcc`
+≥ 11):
+
+```bash
+brew install verilator riscv64-elf-gcc icarus-verilog coreutils
+SIM_TOOL=verilator ./scripts/run_all_variants.sh
+```
 
 ---
 
@@ -532,10 +593,12 @@ mechanism as predicted-taken B-types. To avoid the wasted re-redirect
 that would otherwise happen at D, the D-stage `brj_taken_Dhl` is
 suppressed when the F-stage JAL prediction was the JAL we just decoded.
 
-This saves **1 cycle per JAL** in the program. On `ubmark-bin-search`
-(43 JALs), it lifts IPC from 0.821 (`bp_bht2`) to 0.845
-(`bp_bht2_jal`) — a +2.9% gain. On the other ubmarks, JAL count is
-small (1–3) so the IPC delta is below 0.1%.
+This saves **1 cycle per JAL** in the program. On `ubmark-bin-search`,
+it lifts IPC from 0.812 (`bp_bht2`) to 0.837 (`bp_bht2_jal`) — a +3.1%
+gain on the benchmark with the most function calls (44 JALs in the
+`-O3 -funroll-loops` build). On `ubmark-masked-filter` the lift is
+similar in absolute terms (0.853 → 0.878). On the tighter benchmarks
+(vvadd, cmplx-mult) the JAL count is 1–3 and the IPC delta is < 1%.
 
 ### 10.2 Return Address Stack (`BP_RAS`)
 
@@ -558,28 +621,29 @@ D-stage redirect is allowed to fire, and the wrong-path instructions
 in F+D are squashed. A wrong RAS prediction therefore costs the same
 1-cycle penalty as no RAS — but a correct prediction saves that cycle.
 
-Effect on these benchmarks is small: the ubmarks have only 1–3 JALR
-returns each, and several of those are the final return-from-main
-(stack is fine but the test exits via CSR write before observing the
-return). `ubmark-masked-filter` picks up 1 cycle (`bp_bht2_jal` 9538
-→ `bp_bht2_full` 9537). On a workload with deeper recursion or more
-function calls, the RAS would matter more — this design exploration
-shows the *mechanism* even if the test mix doesn't exercise it
-heavily.
+Effect on these benchmarks is small: the ubmarks have only a handful
+of JALR returns each, and several of those are the final
+return-from-main (stack is fine but the test exits via CSR write
+before observing the return). `ubmark-masked-filter` picks up 2
+cycles between `bp_bht2_jal` (cyc=8007) and `bp_bht2_full` (cyc=8005),
+matching the two RAS pops the predicate-filter loop body issues. On a
+workload with deeper recursion or more function calls, the RAS would
+matter more — this design exploration shows the *mechanism* even if
+the test mix doesn't exercise it heavily.
 
 ### 10.3 Final IPC across all variants (4 ubmarks)
 
 | Variant         | vvadd  | cmplx-mult | bin-search | masked-filter | mean   |
 |-----------------|-------:|-----------:|-----------:|--------------:|-------:|
-| baseline        | 0.6986 |   0.7475   |   0.7146   |    0.6819     | 0.7106 |
-| static-NT       | 0.6986 |   0.7475   |   0.7146   |    0.6819     | 0.7106 |
-| BHT-1           | 0.9914 |   0.9116   |   0.8128   |    0.9242     | 0.9100 |
-| BHT-2           | 0.9914 |   0.9116   |   0.8208   |    0.9222     | 0.9115 |
-| GShare          | 0.9665 |   0.9019   |   0.7799   |    0.9216     | 0.8925 |
-| BHT-2 + JAL     | 0.9919 |   0.9121   |   0.8454   |    0.9223     | 0.9179 |
-| GShare + JAL    | 0.9670 |   0.9024   |   0.8021   |    0.9217     | 0.8983 |
-| BHT-2 full      | 0.9919 |   0.9121   |   0.8454   |    0.9224     | 0.9180 |
-| GShare full     | 0.9670 |   0.9024   |   0.8021   |    0.9218     | 0.8983 |
+| baseline        | 0.7455 |   0.7369   |   0.7255   |    0.7201     | 0.7320 |
+| static-NT       | 0.7455 |   0.7369   |   0.7255   |    0.7201     | 0.7320 |
+| BHT-1           | 0.8885 |   0.7640   |   0.8037   |    0.8449     | 0.8253 |
+| BHT-2           | 0.8885 |   0.7640   |   0.8119   |    0.8535     | 0.8295 |
+| GShare          | 0.8545 |   0.7556   |   0.7857   |    0.8428     | 0.8097 |
+| BHT-2 + JAL     | 0.8894 |   0.7702   |   0.8369   |    0.8775     | 0.8435 |
+| GShare + JAL    | 0.8554 |   0.7617   |   0.8091   |    0.8662     | 0.8231 |
+| BHT-2 full      | 0.8894 |   0.7702   |   0.8369   |    0.8776     | 0.8435 |
+| GShare full     | 0.8554 |   0.7617   |   0.8091   |    0.8663     | 0.8231 |
 
 "full" = BHT/GShare + JAL prediction + RAS.
 
@@ -609,9 +673,9 @@ LUTs (~30 cells). RAS adds ~260 FFs (the 8 × 32-bit stack) plus the
 The Pareto front collapses to two candidates:
 
 - **BHT-1** at the low end of the frontier: smallest predictor that
-  delivers 0.910 mean IPC (only 0.001 below BHT-2 and within
+  delivers 0.825 mean IPC (only 0.004 below BHT-2 and within
   measurement noise on these benchmarks).
-- **BHT-2 full** at the high end: 0.918 mean IPC, +391 cells over
+- **BHT-2 full** at the high end: 0.843 mean IPC, +391 cells over
   BHT-2 plain, mostly from the RAS state.
 
 GShare costs more area than BHT-2 full and delivers *less* IPC on

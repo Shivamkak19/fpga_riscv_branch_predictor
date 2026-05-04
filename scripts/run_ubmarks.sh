@@ -48,9 +48,14 @@ for src in ubmark-vvadd.c ubmark-cmplx-mult.c ubmark-bin-search.c ubmark-masked-
     fi
   fi
 
+  # Lab4-style .out file: same suffix convention as
+  # l4/lab4/build/<name>-long.out, written next to the .log so they're
+  # straight-up diffable against the lab4 reference outputs.
+  cp "$log" "$RESULTS_DIR/${name}-long.out"
+
   status=$(grep -E "\*\*\* (PASSED|FAILED|TIMEOUT) \*\*\*" "$log" | head -1 | awk '{print $2}')
-  cycles=$(awk '/^ cycles  /{print $3; exit}' "$log")
-  inst=$(awk '/^ retired_inst /{print $3; exit}' "$log")
+  cycles=$(awk '/^ num_cycles /{print $3; exit}' "$log")
+  inst=$(awk '/^ num_inst /{print $3; exit}' "$log")
   ipc=$(awk '/^ ipc /{print $3; exit}' "$log")
   br=$(awk '/^ branches /{print $3; exit}' "$log")
   taken=$(awk '/^ taken_branches /{print $3; exit}' "$log")

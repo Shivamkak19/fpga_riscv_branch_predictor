@@ -66,8 +66,8 @@ for src in "$TESTS_DIR"/riscv-${PATTERN}.S; do
   fi
 
   status=$(grep -E "\*\*\* (PASSED|FAILED|TIMEOUT) \*\*\*" "$log" | head -1 | awk '{print $2}')
-  cycles=$(awk '/^ cycles  /{print $3; exit}' "$log")
-  inst=$(awk '/^ retired_inst /{print $3; exit}' "$log")
+  cycles=$(awk '/^ num_cycles /{print $3; exit}' "$log")
+  inst=$(awk '/^ num_inst /{print $3; exit}' "$log")
   ipc=$(awk '/^ ipc /{print $3; exit}' "$log")
   br=$(awk '/^ branches /{print $3; exit}' "$log")
   taken=$(awk '/^ taken_branches /{print $3; exit}' "$log")

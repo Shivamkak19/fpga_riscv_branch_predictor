@@ -148,30 +148,55 @@ variant.
 All 43 assembly tests pass on all 9 variants (387 / 387) — the predictor
 integration preserves architectural correctness in every configuration.
 
+Cycle / instruction counts come from the same `proc.ctrl.num_cycles` /
+`proc.ctrl.num_inst` registers lab4's `riscvlong-sim.v` reads, so the
+ubmark `*-long.out` files in `results/<variant>/` are directly diffable
+against `l4/lab4/build/ubmark-*-long.out`. Compile flags match
+lab4 ubmark.mk (`-march=rv32im_zicsr -mabi=ilp32 -O3 -funroll-loops`)
+under riscv64-unknown-elf-gcc 15.2.0.
+
 ubmark IPC (higher is better) for the 5 primary variants:
 
 | Benchmark           | baseline | static_nt | bht1   | bht2   | gshare |
 |---------------------|---------:|----------:|-------:|-------:|-------:|
-| ubmark-vvadd        | 0.699    | 0.699     | 0.991  | 0.991  | 0.966  |
-| ubmark-cmplx-mult   | 0.747    | 0.747     | 0.912  | 0.912  | 0.902  |
-| ubmark-bin-search   | 0.715    | 0.715     | 0.813  | 0.821  | 0.780  |
-| ubmark-masked-filter| 0.682    | 0.682     | 0.924  | 0.922  | 0.922  |
-| **mean**            | **0.711**| **0.711** | **0.910**| **0.912**| **0.893** |
+| ubmark-vvadd        | 0.7455   | 0.7455    | 0.8885 | 0.8885 | 0.8545 |
+| ubmark-cmplx-mult   | 0.7369   | 0.7369    | 0.7640 | 0.7640 | 0.7556 |
+| ubmark-bin-search   | 0.7255   | 0.7255    | 0.8037 | 0.8119 | 0.7857 |
+| ubmark-masked-filter| 0.7201   | 0.7201    | 0.8449 | 0.8535 | 0.8428 |
+| **mean**            | **0.732**| **0.732** | **0.825**| **0.830**| **0.810** |
 
 With both proposal stretch goals enabled (JAL prediction + RAS):
 
 | Benchmark           | bht2_full | gshare_full |
 |---------------------|----------:|------------:|
-| ubmark-vvadd        | 0.992     | 0.967       |
-| ubmark-cmplx-mult   | 0.912     | 0.902       |
-| ubmark-bin-search   | 0.845     | 0.802       |
-| ubmark-masked-filter| 0.922     | 0.922       |
-| **mean**            | **0.918** | **0.898**   |
+| ubmark-vvadd        | 0.8894    | 0.8554      |
+| ubmark-cmplx-mult   | 0.7702    | 0.7617      |
+| ubmark-bin-search   | 0.8369    | 0.8091      |
+| ubmark-masked-filter| 0.8776    | 0.8663      |
+| **mean**            | **0.843** | **0.823**   |
 
-The biggest single win is `vvadd` (baseline 0.699 → BHT-2 0.991, +42%
+For sanity, here is `baseline / ubmark-vvadd` against lab4's reference
+build of the same source (`-O3 -funroll-loops`, riscvlong, `+stats=1`,
+counters read from `proc.ctrl.num_cycles`):
+
+| Source           | num_cycles | num_inst | ipc    |
+|------------------|-----------:|---------:|-------:|
+| this project     |       1379 |     1028 | 0.7455 |
+| `l4/lab4/build`  |       1453 |     1070 | 0.7361 |
+
+The ~5% gap is from minor differences in the bootstrap (lab4 uses a
+hand-encoded reset vector in `ubmark/convert`; we use `_start` in
+`benchmarks/startup/startup.S`). Once the predictor is enabled, the
+relative comparisons in this report are *between our 9 variants* — the
+methodology and toolchain match lab4's.
+
+The biggest single win is `vvadd` (baseline 0.745 → BHT-2 0.889, +19%
 IPC). The biggest impact of the JAL stretch goal is `bin-search`
-(BHT-2 0.821 → BHT-2+JAL 0.845, +2.9% from removing the 1-cycle JAL
-redirect on its 41 function calls).
+(BHT-2 0.812 → BHT-2+JAL 0.837, +3.1% from removing the 1-cycle JAL
+redirect on its function calls). With `-O3 -funroll-loops`, the
+unrolled inner loops have far fewer dynamic branches than `-O2`, so
+the headline IPC lift from prediction is smaller than it was under the
+old build flags — but the conclusions hold.
 
 See `docs/REPORT.md` for analysis, parameter sweeps, FPGA area/Fmax
 tradeoffs, and the two-dimensional performance/area discussion.

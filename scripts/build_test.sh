@@ -20,10 +20,10 @@ EXT="${BASE##*.}"
 GCC=${RISCV_GCC:-riscv64-elf-gcc}
 OBJDUMP=${RISCV_OBJDUMP:-riscv64-elf-objdump}
 
-# RISCV_MARCH defaults to rv32im — the explicit `_zicsr` suffix is
-# rejected by gcc < 11. Override with `RISCV_MARCH=rv32im_zicsr` on a
-# newer toolchain if you want CSR encoded as a separate extension.
-: "${RISCV_MARCH:=rv32im}"
+# Default to rv32im_zicsr so the asm tests build under the same -march
+# lab4 uses. Older gcc (< 11) doesn't recognize the suffix; in that
+# case set RISCV_MARCH=rv32im before invoking.
+: "${RISCV_MARCH:=rv32im_zicsr}"
 CFLAGS="-march=${RISCV_MARCH} -mabi=ilp32 -nostdlib -nostartfiles -mno-relax -O2"
 INCS="-I$REPO_ROOT/benchmarks/tests/riscv -I$REPO_ROOT/benchmarks/ubmark/ubmark"
 LDSCRIPT="$REPO_ROOT/benchmarks/tests/scripts/test.ld"

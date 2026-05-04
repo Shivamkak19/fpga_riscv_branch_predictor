@@ -1,0 +1,13 @@
+WARNING: /scratch/network/sk3686/ece475/project/fpga_riscv_branch_predictor/sim/verilator/sim_top.v:122: $readmemh: The behaviour for reg[...] mem[N:0]; $readmemh("...", mem); changed in the 1364-2005 standard. To avoid ambiguity, use mem[0:N] or explicit range parameters $readmemh("...", mem, start, stop);. Defaulting to 1364-2005 behavior.
+*** PASSED ***
+--------------------------------------------
+ STATS                                      
+--------------------------------------------
+ status     = 1
+ num_cycles = 9755
+ num_inst   = 7025
+ ipc        = 0.720144
+ branches        = 1170
+ taken_branches  = 828
+ jumps           = 228
+/scratch/network/sk3686/ece475/project/fpga_riscv_branch_predictor/sim/verilator/sim_top.v:254: $finish called at 97625 (1s)

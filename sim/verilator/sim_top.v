@@ -132,6 +132,14 @@ module sim_top;
       $dumpvars;
     end
 
+    // Match lab4 riscvlong-sim.v: when +stats=1, force stats_en=1 in
+    // the DUT so its internal num_cycles/num_inst counters run for the
+    // whole test (the asm tests have no test_stats_on/off, so without
+    // stats_en the counters never advance). For ubmarks the C source
+    // can still toggle csr_stats via test_stats_on/off — the OR with
+    // stats_en just means lab4-style "whole program" counting.
+    if ( stats ) proc.ctrl.stats_en = 1'b1;
+
     #1  reset = 1'b1;
     #50 reset = 1'b0;
   end
@@ -203,6 +211,12 @@ module sim_top;
   reg [31:0] cycle_count    = 32'd0;
   reg        finish_pending = 1'b0;
   real       ipc;
+  // Mirror lab4's headline counters by reading them out of the DUT
+  // (proc.ctrl.num_cycles / num_inst are gated by stats_en || csr_stats,
+  // so they reflect lab4's intended "whole program when stats_en=1, or
+  // kernel-only when only csr_stats is set" counting policy).
+  integer dut_cycles;
+  integer dut_inst;
 
   always @(posedge clk) begin
     cycle_count <= cycle_count + 32'd1;
@@ -213,15 +227,21 @@ module sim_top;
       else                 $display("*** FAILED *** (status=%0d)", status);
 
       if (stats) begin
-        ipc = (total_cycles == 0) ? 0.0 :
-              ($itor(retired_inst) / $itor(total_cycles));
+        // Headline numbers from the DUT — these match lab4's
+        // riscvlong-sim.v "num_cycles / num_inst / ipc" output exactly.
+        dut_cycles = proc.ctrl.num_cycles;
+        dut_inst   = proc.ctrl.num_inst;
+        ipc        = (dut_cycles == 0) ? 0.0
+                                       : ($itor(dut_inst) / $itor(dut_cycles));
         $display("--------------------------------------------");
-        $display(" STATS");
+        $display(" STATS                                      ");
         $display("--------------------------------------------");
-        $display(" status          = %0d", status);
-        $display(" cycles          = %0d", total_cycles);
-        $display(" retired_inst    = %0d", retired_inst);
-        $display(" ipc             = %f",  ipc);
+        $display(" status     = %0d", status);
+        $display(" num_cycles = %0d", dut_cycles);
+        $display(" num_inst   = %0d", dut_inst);
+        $display(" ipc        = %f",  ipc);
+        // Branch-predictor diagnostics — extra to lab4, harmless to
+        // anything that grep's the four headline lines above.
         $display(" branches        = %0d", total_branches);
         $display(" taken_branches  = %0d", taken_branches);
         $display(" jumps           = %0d", total_jumps);

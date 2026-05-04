@@ -1,5 +1,5 @@
 bench	status	cycles	inst	ipc	branches	taken	jumps	mispredicts	pred_correct
-ubmark-vvadd	PASSED	1860	1845	0.991935	400	397	0	7	393
-ubmark-cmplx-mult	PASSED	3560	3247	0.912079	600	397	0	6	594
-ubmark-bin-search	PASSED	1371	1159	0.845368	276	162	2	57	219
-ubmark-masked-filter	PASSED	9538	8797	0.922311	1868	1763	2	82	1786
+ubmark-vvadd	PASSED	1157	1029	0.889369	139	130	1	19	120
+ubmark-cmplx-mult	PASSED	3569	2749	0.770244	271	80	3	14	257
+ubmark-bin-search	PASSED	1337	1119	0.836948	262	145	3	63	199
+ubmark-masked-filter	PASSED	8007	7026	0.877482	1170	828	3	66	1104
