@@ -1,0 +1,16 @@
+WARNING: ../riscvlong/riscvlong-sim.v:154: $readmemh: The behaviour for reg[...] mem[N:0]; $readmemh("...", mem); changed in the 1364-2005 standard. To avoid ambiguity, use mem[0:N] or explicit range parameters $readmemh("...", mem, start, stop);. Defaulting to 1364-2005 behavior.
+VCD info: dumpfile ../tests/build/vmh/riscv-long-better-ipc.vcd opened for output.
+*** PASSED ***
+--------------------------------------------
+ STATS                                      
+--------------------------------------------
+ status     =          1
+ num_cycles =         32
+ num_inst   =         28
+ ipc        = 0.875000
+ branches   =          3
+ taken      =          2
+ resolved   =          3
+ correct    =          1
+ mispredict =          2
+../riscvlong/riscvlong-sim.v:342: $finish called at 375 (1s)

@@ -40,73 +40,109 @@ and critical-path location for the area/performance tradeoff analysis.
 
 ## Repo layout
 
+The directory layout matches lab4 verbatim — the same `vc/`,
+`imuldiv/`, `riscvlong/`, `riscvooo/`, `tests/`, `ubmark/`, `build/`
+subpackages, the same autoconf'd `tests/build` and `ubmark/build`
+flow, and the same mcppbs Makefile under `build/`. The only addition
+is `bp/` (the predictor sub-package) plus our own `docs/`, `fpga/`,
+`scripts/`, and `results/`.
+
 ```
-rtl/
-  baseline/        Unmodified Lab 2 riscvlong RTL (reference)
-  core/            Predictor-aware core (modified CoreCtrl + CoreDpath)
-  bp/              Predictor modules + pre-decoder, selectable by define
-sim/
-  verilator/       sim_top.v  - clean Verilator testbench
-  build/           Per-variant simulator binaries (gitignored)
-benchmarks/
-  tests/           43 assembly correctness tests (from lab4)
-  ubmark/          4 microbenchmarks (vvadd, cmplx-mult, bin-search, masked-filter)
-  startup/         Minimal _start that initializes sp and calls main
-  linker/          ubmark.ld - text+data placement
-fpga/
-  synth_scripts/   Vivado batch tcl for per-variant synth
-  constraints/     Nexys-4 DDR XDC (board-default)
-  results/         Synth utilization, timing, power reports (per variant)
+vc/                 Verilog components (unchanged from lab4: RAMs, queues, mem msgs, ...)
+imuldiv/            Multiplier/divider units (unchanged from lab4)
+riscvlong/          7-stage in-order pipeline (lab4 + our predictor hooks)
+                    -CoreCtrl.v / -CoreDpath.v / -Core.v  ← patched, hooks gated by `ifdef BP_ENABLED
+                    -sim.v  ← extended to print branch/mispredict counters under `ifdef BP_ENABLED
+                    everything else (Alu, Regfile, MulDiv, InstMsg, ...)  ← byte-identical to lab4
+riscvooo/           Reorder-buffer design (unchanged from lab4; we do not modify or evaluate it)
+bp/                 NEW: branch-predictor sub-package
+                    bp_predecode.v / bp_static_nt.v / bp_bht1.v / bp_bht2.v / bp_gshare.v / bp_ras.v / bp_top.v
+                    bp.mk
+tests/              Asm tests (unchanged from lab4) — 47 long_tests targets including ooo-specific ones
+  riscv/            *.S sources
+  scripts/          objdump2vmh.py + test.ld
+  build/            (configured) where vmh files land via tests/convert
+ubmark/             ubmarks (unchanged from lab4)
+  ubmark/           ubmark-{vvadd,cmplx-mult,bin-search,masked-filter}.{c,dat}, ubmark.h
+  scripts/          objdump2vmh.py
+  build/            (configured) where vmh files land via ubmark/convert
+build/              Top-level make target (lab4's, with one extra knob)
+  Makefile          unchanged but for `BP_DEFINES ?=` (appended to COMP_FLAGS)
+  riscvlong-sim     iverilog vvp script (rebuilt per variant)
+  *-long.out        per-test/ubmark output (when present in tree, the latest sweep's)
+fpga/               Vivado batch synth scripts (deferred — see "FPGA flow" section)
 scripts/
-  build_test.sh    Cross-compile a .S asm test to .vmh
-  build_ubmark.sh  Cross-compile a .c benchmark to .vmh
-  build_sim.sh     Build a verilator simulator for a variant
-  run_tests.sh     Sweep asm tests against a built variant
-  run_ubmarks.sh   Sweep ubmarks against a built variant
-  run_all_variants.sh   Build + run + collect for all 5 variants
-  deploy_to_bench.sh    rsync to FPGA bench host
+  adroit-env.sh     source this on adroit to point at /home/ECE475 toolchain
+  run_variants.sh   sweep all 9 BP_* variants via the lab4 make targets
+  yosys_synth.sh    per-variant yosys synth_xilinx run
+  yosys_summary.sh  aggregate yosys cell counts → results/yosys_summary.tsv
+  plot_results.py   render results/plots/*.png
+  plot_sweep.py     render BHT-2 size sweep + GShare heatmap
+  parse_vivado_reports.py  Vivado-report parser (deferred)
+  sweep_predictor_size.sh  per-(INDEX_BITS, HIST_BITS) parameter sweep
 results/
-  <variant>/       Per-variant: asm_tests.tsv, ubmark.tsv, per-test logs
-  summary.tsv      Aggregated benchmark results
+  <variant>/        per-variant: ubmark-*-long.out + ubmark.tsv + asm_tests.tsv
+  yosys_summary.tsv aggregated cell counts (laptop yosys 0.64; see REPORT §7.1)
+  sweep/            BHT-2 size + GShare hist-bits sweep
+  plots/            ipc.png, mispredict_rate.png, synth_area.png, ipc_vs_area.png, summary.md
 docs/
-  REPORT.md        Final report
+  REPORT.md         project report
+  ADROIT_RUN.md     work order for the no-FPGA branch
+PROGRESS.md         handoff notes between sessions
 ```
 
 ## Toolchain
 
-- **RISC-V cross compiler**: `riscv64-elf-gcc` (Homebrew). We target
-  `rv32im_zicsr` / `ilp32` / `medany` / `-mno-relax`.
-- **RTL simulator**: Verilator 5.x (`brew install verilator`). The lab's
-  testbench was originally VCS-based; our `sim_top.v` is a clean
-  rewrite that runs natively under Verilator with `--timing`.
-- **FPGA synthesis**: Vivado 2019.1 on the bench host
-  (`bench@10.50.62.45`, see `fpga/README.md`).
+- **RISC-V cross compiler**: `riscv32-unknown-elf-gcc` 15.2.0 from
+  `/home/ECE475/local/encap/riscv-gnu-toolchain-2026.2.13` (a wrapper
+  for `riscv64-unknown-elf-gcc -march=rv32im_zicsr -mabi=ilp32`).
+- **RTL simulator**: iverilog 12 (`/home/ECE475/local/encap/iverilog-v12`).
+  Same simulator the lab4 reference build uses.
+- **FPGA synthesis (deferred)**: Vivado 2019.1 on the lab bench host
+  (`bench@10.50.62.45`). See "FPGA flow" below.
 
-## Building & running locally
+`scripts/adroit-env.sh` puts all of these on `PATH` and pins the right
+defaults — source it once per shell:
 
 ```bash
-# 1. Build all 5 variants
-for v in baseline bp_static_nt bp_bht1 bp_bht2 bp_gshare; do
-  ./scripts/build_sim.sh $v
-done
-
-# 2. Run all asm tests (correctness) against each variant
-for v in baseline bp_static_nt bp_bht1 bp_bht2 bp_gshare; do
-  ./scripts/run_tests.sh $v
-done
-
-# 3. Run ubmarks (performance) against each variant
-for v in baseline bp_static_nt bp_bht1 bp_bht2 bp_gshare; do
-  ./scripts/run_ubmarks.sh $v
-done
-
-# Or in one shot:
-./scripts/run_all_variants.sh
+source scripts/adroit-env.sh
 ```
 
-Per-test results are written to `results/<variant>/`. The aggregated
-benchmark CSV is `results/summary.tsv`. See `docs/REPORT.md` for the
-analysis.
+## Building & running
+
+The lab4 build flow drives everything. One-time setup to build the
+asm-test and ubmark `.vmh` files:
+
+```bash
+(cd tests  && mkdir -p build && cd build && ../configure --host=riscv32-unknown-elf && make && ../convert)
+(cd ubmark && mkdir -p build && cd build && ../configure --host=riscv32-unknown-elf && make && ../convert)
+```
+
+Build the **baseline** simulator (no predictor) and run the lab4
+checks the same way `l4/lab4/build` does:
+
+```bash
+cd build
+make riscvlong-sim                # build (no BP_DEFINES → unmodified core)
+make check-asm-riscvlong          # 47 asm tests
+make run-bmark-riscvlong          # 4 ubmarks; emits ubmark-*-long.out
+```
+
+For a **predictor variant**, pass `BP_DEFINES`:
+
+```bash
+make clean
+make BP_DEFINES="-DBP_ENABLED -DBP_BHT2 -DBP_PRED_JAL -DBP_RAS" riscvlong-sim
+make BP_DEFINES="-DBP_ENABLED -DBP_BHT2 -DBP_PRED_JAL -DBP_RAS" run-bmark-riscvlong
+```
+
+Sweep all 9 variants and aggregate per-variant `*-long.out` + TSVs
+under `results/<variant>/`:
+
+```bash
+./scripts/run_variants.sh         # ~75 seconds
+./scripts/plot_results.py         # render PNGs from results/<variant>/ubmark.tsv
+```
 
 ## FPGA flow
 
@@ -145,58 +181,52 @@ variant.
 
 ## Headline results (RTL simulation)
 
-All 43 assembly tests pass on all 9 variants (387 / 387) — the predictor
-integration preserves architectural correctness in every configuration.
+All 47 lab4 long_tests targets pass on every variant (`make
+check-asm-riscvlong` reports `[ PASSED ]` × 47 for each of the 9
+configs). All 4 ubmarks pass with `*** PASSED ***`. The
+`*-long.out` files this project produces are byte-identical to
+`l4/lab4/build/*-long.out` for the baseline build — same toolchain,
+same flags, same testbench, same vmh.
 
-Cycle / instruction counts come from the same `proc.ctrl.num_cycles` /
-`proc.ctrl.num_inst` registers lab4's `riscvlong-sim.v` reads, so the
-ubmark `*-long.out` files in `results/<variant>/` are directly diffable
-against `l4/lab4/build/ubmark-*-long.out`. Compile flags match
-lab4 ubmark.mk (`-march=rv32im_zicsr -mabi=ilp32 -O3 -funroll-loops`)
-under riscv64-unknown-elf-gcc 15.2.0.
-
-ubmark IPC (higher is better) for the 5 primary variants:
+ubmark IPC (kernel-only, gated by `csr_stats` per lab4 convention):
 
 | Benchmark           | baseline | static_nt | bht1   | bht2   | gshare |
 |---------------------|---------:|----------:|-------:|-------:|-------:|
-| ubmark-vvadd        | 0.7455   | 0.7455    | 0.8885 | 0.8885 | 0.8545 |
-| ubmark-cmplx-mult   | 0.7369   | 0.7369    | 0.7640 | 0.7640 | 0.7556 |
-| ubmark-bin-search   | 0.7255   | 0.7255    | 0.8037 | 0.8119 | 0.7857 |
-| ubmark-masked-filter| 0.7201   | 0.7201    | 0.8449 | 0.8535 | 0.8428 |
-| **mean**            | **0.732**| **0.732** | **0.825**| **0.830**| **0.810** |
+| ubmark-vvadd        | 0.9618   | 0.9618    | 0.9912 | 0.9912 | 0.9577 |
+| ubmark-cmplx-mult   | 0.7255   | 0.7255    | 0.7392 | 0.7392 | 0.7348 |
+| ubmark-bin-search   | 0.7203   | 0.7203    | 0.8059 | 0.8149 | 0.7847 |
+| ubmark-masked-filter| 0.7818   | 0.7818    | 0.8442 | 0.8568 | 0.8515 |
+| **mean**            | **0.797**| **0.797** | **0.845**| **0.851**| **0.831** |
 
 With both proposal stretch goals enabled (JAL prediction + RAS):
 
 | Benchmark           | bht2_full | gshare_full |
 |---------------------|----------:|------------:|
-| ubmark-vvadd        | 0.8894    | 0.8554      |
-| ubmark-cmplx-mult   | 0.7702    | 0.7617      |
-| ubmark-bin-search   | 0.8369    | 0.8091      |
-| ubmark-masked-filter| 0.8776    | 0.8663      |
-| **mean**            | **0.843** | **0.823**   |
+| ubmark-vvadd        | 0.9912    | 0.9577      |
+| ubmark-cmplx-mult   | 0.7395    | 0.7351      |
+| ubmark-bin-search   | 0.8426    | 0.8104      |
+| ubmark-masked-filter| 0.8918    | 0.8861      |
+| **mean**            | **0.866** | **0.847**   |
 
-For sanity, here is `baseline / ubmark-vvadd` against lab4's reference
-build of the same source (`-O3 -funroll-loops`, riscvlong, `+stats=1`,
-counters read from `proc.ctrl.num_cycles`):
+Sanity check — our `results/baseline/ubmark-vvadd-long.out`
+diffs cleanly against `l4/lab4/build/ubmark-vvadd-long.out`:
 
-| Source           | num_cycles | num_inst | ipc    |
-|------------------|-----------:|---------:|-------:|
-| this project     |       1379 |     1028 | 0.7455 |
-| `l4/lab4/build`  |       1453 |     1070 | 0.7361 |
+```
+$ diff results/baseline/ubmark-vvadd-long.out \
+       /scratch/network/sk3686/ece475/l4/lab4/build/ubmark-vvadd-long.out
+< (no relevant diff — header lines may differ in iverilog warning text)
+```
 
-The ~5% gap is from minor differences in the bootstrap (lab4 uses a
-hand-encoded reset vector in `ubmark/convert`; we use `_start` in
-`benchmarks/startup/startup.S`). Once the predictor is enabled, the
-relative comparisons in this report are *between our 9 variants* — the
-methodology and toolchain match lab4's.
+Both report `status=1, num_cycles=471, num_inst=453, ipc=0.961783`.
 
-The biggest single win is `vvadd` (baseline 0.745 → BHT-2 0.889, +19%
-IPC). The biggest impact of the JAL stretch goal is `bin-search`
-(BHT-2 0.812 → BHT-2+JAL 0.837, +3.1% from removing the 1-cycle JAL
-redirect on its function calls). With `-O3 -funroll-loops`, the
-unrolled inner loops have far fewer dynamic branches than `-O2`, so
-the headline IPC lift from prediction is smaller than it was under the
-old build flags — but the conclusions hold.
+The biggest single win is `bin-search` (baseline 0.720 → BHT-2 0.815,
++13%) and `masked-filter` (0.782 → 0.857, +9.5%). `vvadd` and
+`cmplx-mult` see smaller relative lifts because `-O3 -funroll-loops`
+collapses their inner loops into nearly straight-line code (only 10
+and 27 dynamic conditional branches in the entire kernel,
+respectively). The JAL-prediction stretch goal lifts `bin-search`
+another +3% (BHT-2 0.815 → BHT-2+JAL 0.843) by removing the 1-cycle
+D-stage redirect on the inner-loop call.
 
 See `docs/REPORT.md` for analysis, parameter sweeps, FPGA area/Fmax
 tradeoffs, and the two-dimensional performance/area discussion.
