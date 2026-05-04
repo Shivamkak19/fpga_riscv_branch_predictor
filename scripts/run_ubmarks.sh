@@ -8,15 +8,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 VARIANT=${1:-baseline}
-SIM="$REPO_ROOT/sim/build/$VARIANT/Vsim_top"
+SIM_DIR="$REPO_ROOT/sim/build/$VARIANT"
 BUILD_DIR="$REPO_ROOT/benchmarks/build/$VARIANT"
 RESULTS_DIR="$REPO_ROOT/results/$VARIANT"
 mkdir -p "$BUILD_DIR" "$RESULTS_DIR"
 
-if [ ! -x "$SIM" ]; then
-  echo "ERROR: simulator $SIM not built." >&2
+if   [ -f "$SIM_DIR/sim_top.vvp" ]; then SIM_CMD=(vvp -n "$SIM_DIR/sim_top.vvp")
+elif [ -x "$SIM_DIR/Vsim_top"     ]; then SIM_CMD=("$SIM_DIR/Vsim_top")
+else
+  echo "ERROR: no simulator under $SIM_DIR. Run scripts/build_sim.sh $VARIANT" >&2
   exit 1
 fi
+
+TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || echo '')"
 
 SUMMARY="$RESULTS_DIR/ubmark.tsv"
 echo -e "bench\tstatus\tcycles\tinst\tipc\tbranches\ttaken\tjumps\tmispredicts\tpred_correct" > "$SUMMARY"
@@ -32,9 +36,16 @@ for src in ubmark-vvadd.c ubmark-cmplx-mult.c ubmark-bin-search.c ubmark-masked-
     continue
   fi
 
-  if ! gtimeout 120 "$SIM" +exe="$vmh" +max-cycles=2000000 +stats=1 > "$log" 2>&1; then
-    echo "ERROR run: $name (rc=$?)"
-    continue
+  if [ -n "$TIMEOUT_BIN" ]; then
+    if ! "$TIMEOUT_BIN" 120 "${SIM_CMD[@]}" +exe="$vmh" +max-cycles=2000000 +stats=1 > "$log" 2>&1; then
+      echo "ERROR run: $name (rc=$?)"
+      continue
+    fi
+  else
+    if ! "${SIM_CMD[@]}" +exe="$vmh" +max-cycles=2000000 +stats=1 > "$log" 2>&1; then
+      echo "ERROR run: $name (rc=$?)"
+      continue
+    fi
   fi
 
   status=$(grep -E "\*\*\* (PASSED|FAILED|TIMEOUT) \*\*\*" "$log" | head -1 | awk '{print $2}')

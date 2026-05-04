@@ -20,7 +20,11 @@ EXT="${BASE##*.}"
 GCC=${RISCV_GCC:-riscv64-elf-gcc}
 OBJDUMP=${RISCV_OBJDUMP:-riscv64-elf-objdump}
 
-CFLAGS="-march=rv32im_zicsr -mabi=ilp32 -nostdlib -nostartfiles -mno-relax -O2"
+# RISCV_MARCH defaults to rv32im — the explicit `_zicsr` suffix is
+# rejected by gcc < 11. Override with `RISCV_MARCH=rv32im_zicsr` on a
+# newer toolchain if you want CSR encoded as a separate extension.
+: "${RISCV_MARCH:=rv32im}"
+CFLAGS="-march=${RISCV_MARCH} -mabi=ilp32 -nostdlib -nostartfiles -mno-relax -O2"
 INCS="-I$REPO_ROOT/benchmarks/tests/riscv -I$REPO_ROOT/benchmarks/ubmark/ubmark"
 LDSCRIPT="$REPO_ROOT/benchmarks/tests/scripts/test.ld"
 

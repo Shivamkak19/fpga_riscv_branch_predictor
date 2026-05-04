@@ -1,10 +1,16 @@
 #!/bin/bash
-# build_sim.sh - build a verilator simulator binary for a given variant
+# build_sim.sh - build a simulator binary for a given variant.
 #
-# Usage: build_sim.sh <variant>
-#   <variant> ∈ { baseline | bp_static_nt | bp_bht1 | bp_bht2 | bp_gshare }
+# Usage:   build_sim.sh <variant>
+# Env:     SIM_TOOL = iverilog (default) | verilator
 #
-# Output: build/sim_<variant>/Vsim_top
+# Output:  $REPO_ROOT/sim/build/<variant>/sim_top.vvp   (iverilog)
+#          $REPO_ROOT/sim/build/<variant>/Vsim_top      (verilator >= 5.x)
+#
+# adroit only has Verilator 4.221, which lacks --timing/--binary, so the
+# default backend is iverilog (the testbench uses always #5 clk style
+# delays that need the SV scheduler). Set SIM_TOOL=verilator on a host
+# with a 5.x verilator if you want the faster C++ backend.
 
 set -euo pipefail
 
@@ -12,6 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 VARIANT=${1:-baseline}
+SIM_TOOL=${SIM_TOOL:-iverilog}
 OUTDIR="$REPO_ROOT/sim/build/$VARIANT"
 mkdir -p "$OUTDIR"
 
@@ -52,20 +59,38 @@ esac
 INCS=()
 for d in "${RTL_DIRS[@]}"; do INCS+=("-I$d"); done
 
-WARN_OFF=(
-  -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-MULTITOP -Wno-CASEINCOMPLETE
-  -Wno-MULTIDRIVEN -Wno-LATCH -Wno-UNOPTFLAT -Wno-UNUSEDPARAM
-  -Wno-UNUSEDSIGNAL -Wno-UNUSEDGENVAR -Wno-VARHIDDEN -Wno-CASEX
-  -Wno-PINMISSING -Wno-IMPLICIT
-)
+echo "[build_sim] tool=$SIM_TOOL variant=$VARIANT defines=${DEFINES[*]:-none}"
 
-echo "[build_sim] variant=$VARIANT defines=${DEFINES[*]:-none}"
-DEFARGS=()
-[ ${#DEFINES[@]} -gt 0 ] && DEFARGS=("${DEFINES[@]}")
-verilator --binary --timing --language 1364-2005 --top-module sim_top \
-  "${WARN_OFF[@]}" --x-initial 0 \
-  --Mdir "$OUTDIR" \
-  "${INCS[@]}" ${DEFARGS[@]+"${DEFARGS[@]}"} \
-  "$REPO_ROOT/sim/verilator/sim_top.v"
+case "$SIM_TOOL" in
+  iverilog)
+    # The lab vc/* RTL uses `type` as a port identifier — that's a
+    # reserved word under -g2005-sv, so stay on plain IEEE 1364-2005.
+    OUT="$OUTDIR/sim_top.vvp"
+    iverilog -g2005 -o "$OUT" -s sim_top \
+      "${INCS[@]}" "${DEFINES[@]}" \
+      "$REPO_ROOT/sim/verilator/sim_top.v"
+    echo "[build_sim] ok: $OUT"
+    ;;
 
-echo "[build_sim] ok: $OUTDIR/Vsim_top"
+  verilator)
+    WARN_OFF=(
+      -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-MULTITOP -Wno-CASEINCOMPLETE
+      -Wno-MULTIDRIVEN -Wno-LATCH -Wno-UNOPTFLAT -Wno-UNUSEDPARAM
+      -Wno-UNUSEDSIGNAL -Wno-UNUSEDGENVAR -Wno-VARHIDDEN -Wno-CASEX
+      -Wno-PINMISSING -Wno-IMPLICIT
+    )
+    DEFARGS=()
+    [ ${#DEFINES[@]} -gt 0 ] && DEFARGS=("${DEFINES[@]}")
+    verilator --binary --timing --language 1364-2005 --top-module sim_top \
+      "${WARN_OFF[@]}" --x-initial 0 \
+      --Mdir "$OUTDIR" \
+      "${INCS[@]}" ${DEFARGS[@]+"${DEFARGS[@]}"} \
+      "$REPO_ROOT/sim/verilator/sim_top.v"
+    echo "[build_sim] ok: $OUTDIR/Vsim_top"
+    ;;
+
+  *)
+    echo "ERROR: unknown SIM_TOOL '$SIM_TOOL' (use iverilog or verilator)" >&2
+    exit 1
+    ;;
+esac

@@ -18,7 +18,10 @@ NAME="${BASE%.c}"
 GCC=${RISCV_GCC:-riscv64-elf-gcc}
 OBJDUMP=${RISCV_OBJDUMP:-riscv64-elf-objdump}
 
-CFLAGS="-march=rv32im_zicsr -mabi=ilp32 -mcmodel=medany -mno-relax \
+# RISCV_MARCH defaults to rv32im — the explicit `_zicsr` suffix is
+# rejected by gcc < 11. Override on a newer toolchain if desired.
+: "${RISCV_MARCH:=rv32im}"
+CFLAGS="-march=${RISCV_MARCH} -mabi=ilp32 -mcmodel=medany -mno-relax \
         -nostdlib -nostartfiles -ffreestanding -fno-builtin -O2 -g \
         -Wno-unused-result"
 INCS="-I$REPO_ROOT/benchmarks/ubmark/ubmark"

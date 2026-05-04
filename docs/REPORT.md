@@ -39,6 +39,24 @@ in this design is 2 cycles (squash F + D) rather than the 3-cycle
 penalty the proposal cited for an X0-resolution dual-issue design. All
 three predictor algorithms apply unchanged.
 
+### Further scope adjustment (post-proposal)
+
+The proposal's FPGA leg — Vivado synthesis on the lab bench host plus
+on-board IPS measurement on the Nexys-4 DDR — was cut after the bench
+host (`bench@10.50.62.45`) became unreachable across the project
+window. Princeton OIT eduroam does not route to the `10.50.62.x` lab
+subnet on its own; reaching it requires GlobalProtect VPN, and once
+the GP tunnel was up the bench's sshd accepted TCP on port 22 but
+never sent its banner — almost certainly fail2ban or a stuck sshd
+worker, fixable only with a physical power-cycle of the lab machine.
+Since none of the project authors had bench access during the
+remaining project window, we recast the area axis as **relative cell
+counts from yosys `synth_xilinx -family xc7`** (Artix-7 cell library,
+no place-and-route, no Fmax). Performance is reported as IPC only;
+the proposal's "instructions per second" tradeoff narrative is
+reframed as "IPC at known relative area." All RTL, all simulation
+infrastructure, and the per-variant yosys flow run unchanged.
+
 ---
 
 ## 2. Baseline pipeline and where mispredictions hurt
@@ -249,15 +267,20 @@ with the actual outcome.
 ## 5. Functional verification
 
 All 43 RISC-V assembly tests from the lab tree pass on every
-configuration:
+configuration — including the four stretch-goal variants that layer
+JAL prediction and the RAS on top of BHT-2 / GShare:
 
-| Variant       | passed | failed | error |
-|---------------|-------:|-------:|------:|
-| baseline      |     43 |      0 |     0 |
-| bp_static_nt  |     43 |      0 |     0 |
-| bp_bht1       |     43 |      0 |     0 |
-| bp_bht2       |     43 |      0 |     0 |
-| bp_gshare     |     43 |      0 |     0 |
+| Variant         | passed | failed | error |
+|-----------------|-------:|-------:|------:|
+| baseline        |     43 |      0 |     0 |
+| bp_static_nt    |     43 |      0 |     0 |
+| bp_bht1         |     43 |      0 |     0 |
+| bp_bht2         |     43 |      0 |     0 |
+| bp_gshare       |     43 |      0 |     0 |
+| bp_bht2_jal     |     43 |      0 |     0 |
+| bp_gshare_jal   |     43 |      0 |     0 |
+| bp_bht2_full    |     43 |      0 |     0 |
+| bp_gshare_full  |     43 |      0 |     0 |
 
 This includes every branch test (`riscv-beq`, `riscv-bne`, `riscv-blt`,
 `riscv-bge`, `riscv-bltu`, `riscv-bgeu`), every jump test (`riscv-j`,
@@ -350,16 +373,15 @@ test harness.
 
 ---
 
-## 7. FPGA synthesis results
+## 7. Synthesis results — yosys (relative area)
 
-We ran two complementary synth flows:
-
-1. **`yosys -p synth_xilinx -family xc7`** (committed): runs locally on the
-   laptop, gives a quick technology-mapped cell count comparison across
-   all five variants. Numbers below.
-2. **Vivado 2019.1 on the bench host** (script committed, run pending VPN):
-   produces the authoritative LUT/FF/DSP/BRAM utilization and timing
-   reports against the actual `xc7a100tcsg324-1` part.
+Without bench access we could not run Vivado place-and-route, so the
+area axis below is **relative cell counts** from
+`yosys -p 'synth_xilinx -family xc7'`. The Vivado batch flow
+(`fpga/synth_scripts/synth_variant.tcl`), Vivado-report parser
+(`scripts/parse_vivado_reports.py`), and `plot_results.py --source
+vivado` mode are all committed and runnable end-to-end if a bench
+becomes available later — see §11.
 
 ### 7.1 Yosys synth_xilinx — relative cell counts
 
@@ -419,149 +441,6 @@ mean IPC to three decimals. BHT-2 buys a tiny improvement on
 slightly less accurate on this workload mix because its history
 correlation hurts on tight loops.
 
-### 7.3 Vivado synth (on-bench) — post-implementation utilization + Fmax
-
-The Vivado flow runs on the lab bench host (`bench@10.50.62.45`,
-Nexys-4 DDR / Artix-7 xc7a100tcsg324-1).
-`fpga/synth_scripts/synth_variant.tcl` performs the per-variant
-build:
-
-1. Overlays the variant's RTL files into `~/ece475-lab4/riscvlong/`
-   (and the predictor sources into `~/ece475-lab4/bp/`)
-2. Sets the appropriate `BP_*` verilog defines on the project's
-   fileset
-3. Resets and re-runs `synth_1`, then `impl_1` through bitstream
-4. Captures `report_utilization`, `report_timing_summary`,
-   `report_timing -delay_type max -max_paths 25`, and `report_power`
-5. Copies the bitstream to `~/results/<variant>/fpga_top.bit`
-
-End-to-end run, from a clean checkout on the laptop:
-
-```bash
-./scripts/deploy_to_bench.sh                                # rsync repo to bench
-ssh bench
-cd ~/riscv-fpga/xilinx_proj
-for v in baseline bp_static_nt bp_bht1 bp_bht2 bp_gshare \
-         bp_bht2_jal bp_gshare_jal bp_bht2_full bp_gshare_full; do
-  vivado -mode batch -nojournal -nolog \
-         -source ~/fpga_riscv_branch_predictor/fpga/synth_scripts/synth_variant.tcl \
-         -tclargs $v
-done
-exit
-scp -r bench:~/results ./fpga_results                       # fetch reports
-./scripts/parse_vivado_reports.py                           # → results/vivado_summary.tsv
-./scripts/plot_results.py --source vivado                   # → synth_area.png, fmax.png,
-                                                            #   ipc_vs_area.png, mips_vs_area.png
-```
-
-`scripts/parse_vivado_reports.py` reads each
-`fpga_results/<variant>/{utilization.rpt, timing_summary.rpt, power.rpt}`,
-extracts post-implementation Slice LUTs / Slice Registers / BRAM tiles
-/ DSPs, target clock period, WNS, and total on-chip power, and
-computes achieved Fmax = 1000 / (period_ns − WNS_ns). Output is
-`results/vivado_summary.tsv`.
-
-#### 7.3.1 Post-implementation utilization + Fmax (filled by parser)
-
-| Variant         | Slice LUTs | Slice Regs | BRAM tile | DSP | Fmax (MHz) | Power (W) |
-|-----------------|-----------:|-----------:|----------:|----:|-----------:|----------:|
-| baseline        |        TBD |        TBD |       TBD | TBD |        TBD |       TBD |
-| bp_static_nt    |        TBD |        TBD |       TBD | TBD |        TBD |       TBD |
-| bp_bht1         |        TBD |        TBD |       TBD | TBD |        TBD |       TBD |
-| bp_bht2         |        TBD |        TBD |       TBD | TBD |        TBD |       TBD |
-| bp_gshare       |        TBD |        TBD |       TBD | TBD |        TBD |       TBD |
-| bp_bht2_jal     |        TBD |        TBD |       TBD | TBD |        TBD |       TBD |
-| bp_gshare_jal   |        TBD |        TBD |       TBD | TBD |        TBD |       TBD |
-| bp_bht2_full    |        TBD |        TBD |       TBD | TBD |        TBD |       TBD |
-| bp_gshare_full  |        TBD |        TBD |       TBD | TBD |        TBD |       TBD |
-
-> **Status:** as of this revision the bench host is unreachable from
-> the laptop (Princeton OIT eduroam does not route to the `10.50.62.x`
-> lab subnet — needs OIT GlobalProtect VPN or a wired drop in the EE
-> building). Synth scripts, parser, and plot extension are all
-> committed and tested against synthetic Vivado fixtures; the table
-> above and §7.4 below are one bench session away from being filled.
-
-#### 7.3.2 Predicted critical path and BRAM placement
-
-The predictor designs are small relative to the rest of the core.
-Expected FF / LUT impact for each variant relative to baseline:
-
-- **bp_static_nt**: ~zero — just the pre-decoder and a few pipeline
-  registers, all of which optimize away when `predict_taken` is
-  constant 0.
-- **bp_bht1**: 256 1-bit FFs (the table) + the read/write LUT logic
-  + 2 pipeline FFs for `pred_taken_Dhl`/`pred_taken_Xhl`. Roughly
-  ~270 FFs and a few dozen LUTs of overhead.
-- **bp_bht2**: 512 FFs (256 entries × 2 bits) + counter increment/
-  decrement logic. Roughly ~520 FFs, a few hundred LUTs.
-- **bp_gshare**: 512 PHT FFs + 8-bit GHR + an 8-input XOR for the
-  index. Slightly more than BHT-2 because of the XOR network and
-  the GHR shift register.
-
-Critical-path concern: the BHT/GShare read sits on the F-stage
-PC-mux path (predicted target feeds `pc_mux_out_Phl`, which drives
-both the imreq output and `pc_Fhl <=`). If Vivado places the BHT in
-distributed RAM, the read is one LUT delay; in BRAM it's a clocked
-read, which would force a one-cycle delay we did not pipeline for.
-The intended mapping is **distributed RAM (LUTs)** since we use a
-simple `reg [W-1:0] table_r [N-1:0]` declaration without
-`(* ram_style="block" *)`. We will confirm from §7.3.1's BRAM-tile
-column — a baseline value of 12 is expected (the I-/D-mem RAMs);
-any variant that exceeds 12 indicates Vivado promoted the predictor
-table to BRAM and we need to re-pipeline.
-
-If GShare moves the critical path significantly (the XOR + index +
-read all sit before the PC-mux), the IPC win on the bigger
-benchmarks must be weighed against a possible Fmax drop. §7.4
-captures the wall-clock answer.
-
-### 7.4 On-board IPS measurement
-
-Simulation IPC tells us cycles-per-instruction; Vivado Fmax tells us
-clock-period-per-cycle. The product — instructions per second —
-is the metric the user actually feels. §7.3.1 gives Fmax under
-post-implementation timing analysis, but routing congestion and
-clock-tree skew on the actual silicon can shift the achievable rate.
-This section closes the loop with a measured number from the FPGA.
-
-Procedure (per variant):
-
-1. Copy `fpga_results/<variant>/fpga_top.bit` to the bench host.
-2. Open VNC tunnel: `ssh -L 5905:localhost:5905 bench`, then VNC
-   client → `localhost:5905`.
-3. In Vivado on bench, open the Hardware Manager and program the
-   Nexys-4 DDR with the variant's bitstream.
-4. Use the lab's serial loader to push each ubmark `.vmh` onto the
-   board. The lab top-level returns the cycle count via UART when
-   `csr_status != 0`.
-5. Record `cycles_board` per ubmark per variant.
-
-For each (variant, benchmark):
-
-```
-IPS_actual    = retired_instructions × Fmax_MHz × 1e6 / cycles_board
-IPS_projected = retired_instructions × Fmax_MHz × 1e6 / cycles_sim
-```
-
-`retired_instructions` and `cycles_sim` come from
-`results/<variant>/ubmark.tsv` (already collected). `Fmax_MHz` comes
-from `results/vivado_summary.tsv`. A close match between actual
-and projected IPS validates that the simulation cycle counts
-transfer to silicon.
-
-| Variant         | benchmark            | inst | cyc_sim | cyc_board | Fmax (MHz) | IPS_actual | IPS_projected | match |
-|-----------------|----------------------|-----:|--------:|----------:|-----------:|-----------:|--------------:|------:|
-| baseline        | ubmark-vvadd         |  TBD |     TBD |       TBD |        TBD |        TBD |           TBD |   TBD |
-| bp_bht2_full    | ubmark-vvadd         |  TBD |     TBD |       TBD |        TBD |        TBD |           TBD |   TBD |
-| bp_gshare_full  | ubmark-vvadd         |  TBD |     TBD |       TBD |        TBD |        TBD |           TBD |   TBD |
-| ...             | (one row per variant × ubmark, 9 × 4 = 36 rows) |||||||||
-
-The headline numbers we'll quote in §8 are mean IPS per variant
-across the 4 ubmarks: simulation-projected vs board-measured. Any
-delta > ~5% is worth investigating (clock manager configuration,
-serial loader overhead in the cycle counter, etc.).
-
 ---
 
 ## 8. Two-dimensional tradeoff analysis
@@ -585,26 +464,57 @@ strength — exploiting recent path correlation — doesn't pay off on
 loop-heavy microbenchmarks where the same PC always wants the same
 prediction.
 
-Once the Fmax numbers come in, the second axis (instructions per
-**second**, not per cycle) might tell a different story. For example,
-if GShare's XOR network drops Fmax by 5% relative to BHT-2 with no IPC
-benefit, the wall-clock answer will favor BHT-2 even more strongly.
+Without Vivado place-and-route data we can't translate IPC to
+wall-clock IPS — that conversion was the proposal's headline
+deliverable but is unrecoverable from the simulation flow alone. The
+honest claim this writeup can defend is **IPC vs relative cell area**,
+where BHT-2 (with both stretch goals) is the Pareto winner among the
+9 design points evaluated. If a future bench session lands the Fmax
+data, GShare's XOR network is the variant most likely to shift the
+Pareto picture — the rest of the predictor logic is small enough
+relative to the rest of the core that we expect it not to move
+critical-path delay materially.
 
 ---
 
 ## 9. Build & run reproducibility
 
-Every result above is reproducible from a clean checkout with:
+The committed TSVs come from a Mac laptop (Verilator 5.048,
+`riscv64-elf-gcc` 16.1.0). The same flow runs on Princeton's
+`adroit-vis.princeton.edu` cluster — see `docs/ADROIT_RUN.md` for
+the toolchain notes (Verilator 4.221, `riscv64-unknown-elf-gcc` 9.2,
+fall back to iverilog 11 since 4.221 lacks `--timing`). Both
+environments agree on functional pass/fail (387/387 asm + 36/36
+ubmark) and on the *relative* IPC ordering across variants. Absolute
+cycle counts shift slightly because gcc 9.2 emits different code
+than gcc 16.1, but BHT-2 still wins, GShare still trails BHT-2 on
+this workload, and `static_nt` is still equivalent to `baseline`.
+
+Local re-run:
 
 ```bash
 brew install verilator riscv64-elf-gcc icarus-verilog coreutils
 ./scripts/run_all_variants.sh
 ```
 
-This re-runs the full sweep (5 variants × {43 asm tests + 4 ubmarks})
-and writes `results/<variant>/{asm_tests.tsv, ubmark.tsv}` plus an
-aggregated `results/summary.tsv`. The committed TSVs in this repo come
-from exactly this flow on the local laptop.
+Adroit re-run (see `docs/ADROIT_RUN.md` for full details):
+
+```bash
+export PATH=/home/ee475/local/encap/verilator-2022.04.26/bin:$PATH
+export RISCV_GCC=riscv64-unknown-elf-gcc \
+       RISCV_OBJDUMP=riscv64-unknown-elf-objdump \
+       RISCV_MARCH=rv32im SIM_TOOL=iverilog
+for v in baseline bp_static_nt bp_bht1 bp_bht2 bp_gshare \
+         bp_bht2_jal bp_gshare_jal bp_bht2_full bp_gshare_full; do
+  ./scripts/build_sim.sh   $v
+  ./scripts/run_tests.sh   $v
+  ./scripts/run_ubmarks.sh $v
+done
+```
+
+Adroit re-run output is archived under `results/adroit/<variant>/`
+side-by-side with the laptop runs; `results/<variant>/` itself stays
+the laptop-derived primary data referenced throughout this report.
 
 ---
 
@@ -716,11 +626,13 @@ benchmarks ported, so the Pareto picture here is what it is.
 
 ## 11. Open work
 
-1. **Vivado synth on the bench host.** Nine batch jobs (one per
-   variant), each ~10–15 minutes on the Artix-7 part. The
-   synth_variant.tcl already supports all variant names. Pending VPN
-   reconnect.
-2. **On-board IPS measurement.** With the bitstream programmed, run
-   each ubmark via the UART loader and record wall-clock cycles. This
-   combines with Vivado's reported Fmax to give actual
-   instructions-per-second.
+- **FPGA implementation deferred.** The proposed Vivado synth and
+  on-board IPS measurement on the Nexys-4 DDR are unfinished due to
+  lab bench host unreachability (banner-exchange failure on bench
+  sshd, no power-cycle access during the project window). The
+  synthesis flow scripts (`fpga/synth_scripts/synth_variant.tcl`,
+  `scripts/parse_vivado_reports.py`,
+  `scripts/plot_results.py --source vivado`) remain in the repository
+  and are runnable end-to-end as soon as a suitably-configured Vivado
+  bench is available. See `PROGRESS.md` "Session 2 status" for the
+  full network diagnosis.

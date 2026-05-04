@@ -12,17 +12,22 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 VARIANT=${1:-baseline}
 PATTERN=${2:-"*"}
 
-SIM="$REPO_ROOT/sim/build/$VARIANT/Vsim_top"
+SIM_DIR="$REPO_ROOT/sim/build/$VARIANT"
 TESTS_DIR="$REPO_ROOT/benchmarks/tests/riscv"
 BUILD_DIR="$REPO_ROOT/benchmarks/build/$VARIANT"
 RESULTS_DIR="$REPO_ROOT/results/$VARIANT"
 
 mkdir -p "$BUILD_DIR" "$RESULTS_DIR"
 
-if [ ! -x "$SIM" ]; then
-  echo "ERROR: simulator $SIM not built. Run scripts/build_sim.sh $VARIANT" >&2
+# Pick whichever simulator artifact build_sim.sh produced.
+if   [ -f "$SIM_DIR/sim_top.vvp" ]; then SIM_CMD=(vvp -n "$SIM_DIR/sim_top.vvp")
+elif [ -x "$SIM_DIR/Vsim_top"     ]; then SIM_CMD=("$SIM_DIR/Vsim_top")
+else
+  echo "ERROR: no simulator under $SIM_DIR. Run scripts/build_sim.sh $VARIANT" >&2
   exit 1
 fi
+
+TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || echo '')"
 
 SUMMARY="$RESULTS_DIR/asm_tests.tsv"
 echo -e "test\tstatus\tcycles\tinst\tipc\tbranches\ttaken\tjumps\tmispredicts" > "$SUMMARY"
@@ -44,11 +49,20 @@ for src in "$TESTS_DIR"/riscv-${PATTERN}.S; do
   fi
 
   # Run
-  if ! gtimeout 60 "$SIM" +exe="$vmh" +max-cycles=200000 +stats=1 > "$log" 2>&1; then
-    rc=$?
-    echo "ERROR run rc=$rc: $test"
-    ERROR=$((ERROR+1))
-    continue
+  if [ -n "$TIMEOUT_BIN" ]; then
+    if ! "$TIMEOUT_BIN" 60 "${SIM_CMD[@]}" +exe="$vmh" +max-cycles=200000 +stats=1 > "$log" 2>&1; then
+      rc=$?
+      echo "ERROR run rc=$rc: $test"
+      ERROR=$((ERROR+1))
+      continue
+    fi
+  else
+    if ! "${SIM_CMD[@]}" +exe="$vmh" +max-cycles=200000 +stats=1 > "$log" 2>&1; then
+      rc=$?
+      echo "ERROR run rc=$rc: $test"
+      ERROR=$((ERROR+1))
+      continue
+    fi
   fi
 
   status=$(grep -E "\*\*\* (PASSED|FAILED|TIMEOUT) \*\*\*" "$log" | head -1 | awk '{print $2}')

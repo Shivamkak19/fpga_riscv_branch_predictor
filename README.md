@@ -110,6 +110,14 @@ analysis.
 
 ## FPGA flow
 
+> **Status:** the FPGA leg is **deferred** in this branch
+> (`adroit-no-fpga`) — the Princeton lab bench host became unreachable
+> across the project window, so we recast the area axis as relative
+> cell counts from yosys instead of post-implementation Vivado data.
+> The scripts below are retained but not executed in this branch; see
+> `docs/ADROIT_RUN.md` for the no-FPGA work order and `PROGRESS.md`
+> for the network diagnosis.
+
 The FPGA build runs on the lab bench host (Nexys-4 DDR + xc7a100tcsg324-1
 Artix-7). The Vivado project lives at `~/riscv-fpga/xilinx_proj/` on the
 bench host and references RTL under `~/ece475-lab4/`. To synth a variant
