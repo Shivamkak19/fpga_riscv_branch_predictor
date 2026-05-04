@@ -1,0 +1,66 @@
+# Build artifacts (configure-generated; rebuild via `make`).
+tests/build/Makefile
+tests/build/config.*
+tests/build/dep/
+tests/build/obj/
+tests/build/bin/
+tests/build/dump/
+tests/build/*.d
+
+ubmark/build/Makefile
+ubmark/build/config.*
+ubmark/build/ubmark.mk
+ubmark/build/ubmark-config.h
+ubmark/build/dep/
+ubmark/build/obj/
+ubmark/build/bin/
+ubmark/build/dump/
+ubmark/build/*.a
+ubmark/build/*.o
+ubmark/build/*.d
+
+# Top-level lab4 build dir (transient artifacts; Makefile is committed).
+build/riscvooo-sim
+build/riscvooo-randdelay-sim
+build/riscvlong-sim
+build/riscvlong-randdelay-sim
+build/*.vcd
+build/*.out
+build/*-utst
+build/template.sav
+
+# Autotools detritus
+tests/autom4te.cache/
+ubmark/autom4te.cache/
+
+# Per-variant logs
+results/*.log
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Editor noise
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.pyc
+
+# Vivado run dirs (deferred — kept for the eventual on-bench session)
+*.jou
+*.str
+*.pb
+*.dcp
+*.bit
+*.ltx
+.Xil/
+
+# Don't ever commit secrets
+secrets.txt
+*.pem
+*.key
+.env

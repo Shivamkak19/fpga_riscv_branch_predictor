@@ -1,0 +1,16 @@
+WARNING: ../riscvooo/riscvooo-sim.v:154: $readmemh: The behaviour for reg[...] mem[N:0]; $readmemh("...", mem); changed in the 1364-2005 standard. To avoid ambiguity, use mem[0:N] or explicit range parameters $readmemh("...", mem, start, stop);. Defaulting to 1364-2005 behavior.
+VCD info: dumpfile ../tests/build/vmh/riscv-divu.vcd opened for output.
+*** PASSED ***
+--------------------------------------------
+ STATS                                      
+--------------------------------------------
+ status     =          1
+ num_cycles =        350
+ num_inst   =        305
+ ipc        = 0.871429
+ branches   =         41
+ taken      =          1
+ resolved   =         41
+ correct    =         40
+ mispredict =          1
+../riscvooo/riscvooo-sim.v:342: $finish called at 3555 (1s)
