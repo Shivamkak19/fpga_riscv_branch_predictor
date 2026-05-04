@@ -38,8 +38,8 @@ a 2-bit saturating-counter BHT, and a two-level adaptive predictor
 that XORs the program counter with an 8-bit global history register
 to index a single shared pattern history table (the GShare variant
 from McFarling 1993). On top of these, we implement two stretch
-goals from the proposal --- an 8-deep return-address stack (RAS) and
-F-stage JAL prediction --- gated behind a single
+goals from the proposal -- an 8-deep return-address stack (RAS) and
+F-stage JAL prediction -- gated behind a single
 \texttt{BP\_ENABLED} define so the unmodified path is byte-equivalent
 to lab4. Across the four lab~4 ubmarks, the 2-bit BHT lifts mean IPC
 from a baseline of 0.741 to 0.786 ($+6.1\%$), and adding JAL
@@ -90,6 +90,14 @@ B-type and $\texttt{jal\_target}=\texttt{pc}+\text{sext}(\texttt{imm\_uj})$
 for JAL. JALR's target requires \texttt{rs1} and is left to the
 existing 1-cycle D-stage redirect.
 
+The \texttt{static\_nt} predictor (\texttt{bp\_static\_nt.v}) is
+stateless: \texttt{predict\_taken} is hardwired to 0 for every PC,
+matching the lab core's existing fetch-PC+4 behaviour. It exists as
+the integration-overhead control -- it wires up every pipeline
+register and PC-mux input the predictor adds without ever asserting
+a redirect, so any cycle delta against \texttt{baseline} isolates
+the wiring overhead.
+
 The 1-bit BHT (\texttt{bp\_bht1.v}) is a 256-entry register array
 with one bit per entry, indexed by $\texttt{pc}[9{:}2]$ on read and on
 write. The 2-bit BHT (\texttt{bp\_bht2.v}) replaces each entry with
@@ -135,16 +143,16 @@ redirect, X-stage resolve, diagnostic counters),
 \texttt{riscvooo-sim.v} (printing the new diagnostic counters in the
 output \texttt{*-ooo.out} file). Every change is gated by
 \texttt{`ifdef BP\_ENABLED}, so the OoO machinery downstream of
-F$\rightarrow$D --- the scoreboard and the reorder buffer we
-implemented in Lab 4 --- is untouched. Wrong-path instructions are
+F$\rightarrow$D -- the scoreboard and the reorder buffer we
+implemented in Lab 4 -- is untouched. Wrong-path instructions are
 squashed in F+D \emph{before} they enter issue, which means the ROB
 never sees an instruction that won't commit; no checkpoint stack,
 no rollback machinery, and no ROB-flush logic are required. The
 predictor is purely a front-end addition.
 
 The pre-decoder runs combinationally on the
-\texttt{imemresp\_queue} mux output --- the 32-bit instruction word
-that D will receive next cycle --- tagged with \texttt{pc\_Fhl}, and
+\texttt{imemresp\_queue} mux output -- the 32-bit instruction word
+that D will receive next cycle -- tagged with \texttt{pc\_Fhl}, and
 the predictor is queried with the same PC. The F stage fires a
 redirect through a new PC-mux input when the instruction is a
 predicted-taken B-type, when it is a JAL (under \texttt{BP\_PRED\_JAL}),
@@ -184,7 +192,12 @@ pipelined \texttt{pred\_jal\_Dhl} flag, and on a JALR-return whose
 RAS prediction matches the actual register-computed target a 32-bit
 equality check in dpath (\texttt{pred\_target\_match\_Dhl}) gates the
 D-stage redirect off. Wrong RAS predictions still cost the existing
-1-cycle penalty.
+1-cycle penalty. JAL predictions, by contrast, can never be wrong:
+$\texttt{jal\_target}_F = \texttt{pc}_F + \text{sext}(\texttt{imm\_uj})$
+is a deterministic function of bits already available in F, so the
+X-stage compare never has to verify a JAL prediction; the pipelined
+\texttt{pred\_jal\_Dhl} flag is consumed only to gate off the
+D-stage fallback redirect.
 
 \section{Methodology}
 
@@ -204,17 +217,17 @@ make BP_DEFINES="-DBP_ENABLED -DBP_BHT2 -DBP_PRED_JAL -DBP_RAS" \
 \end{verbatim}
 
 The cycle and instruction counts are read from
-\texttt{proc.ctrl.num\_cycles} and \texttt{proc.ctrl.num\_inst} ---
-the same registers \texttt{riscvooo-sim.v} reports in lab4 --- gated
+\texttt{proc.ctrl.num\_cycles} and \texttt{proc.ctrl.num\_inst} --
+the same registers \texttt{riscvooo-sim.v} reports in lab4 -- gated
 by $\texttt{stats\_en} \lor \texttt{csr\_stats}$. The ubmark
 \texttt{make} target passes \texttt{+verbose=1} (no \texttt{+stats}),
 so the counters fire only inside the \texttt{test\_stats\_on} /
 \texttt{test\_stats\_off} kernel region of each benchmark, which is
 the convention lab4 uses; the asm-test rule passes \texttt{+stats=1}
 and counts the whole program. Five new \texttt{BP\_ENABLED}-gated
-counters --- \texttt{num\_branches}, \texttt{num\_taken},
+counters -- \texttt{num\_branches}, \texttt{num\_taken},
 \texttt{num\_pred\_resolve}, \texttt{num\_pred\_correct},
-\texttt{num\_mispredicts} --- share the same gating clause.
+\texttt{num\_mispredicts} -- share the same gating clause.
 
 We sweep nine BP variants: baseline, \texttt{static\_nt}, BHT-1,
 BHT-2, two-level, plus three pairings of BHT-2 and the two-level
@@ -313,7 +326,7 @@ the unmodified core.
 The first thing to note is that \texttt{baseline} and
 \texttt{static\_nt} produce identical IPC to four decimal places on
 every benchmark. The lab core's existing behaviour is itself
-``always not-taken'' --- fetch PC+4, correct on X resolution --- so
+``always not-taken'' -- fetch PC+4, correct on X resolution -- so
 adding the predictor in \texttt{static\_nt} mode should not change
 observable behaviour, and it does not. This validates that the new
 pipeline registers, the widened PC mux, and the \texttt{`ifdef BP\_ENABLED}
@@ -339,7 +352,7 @@ anyway, so the same PC maps to different PHT counters depending on
 how many other taken branches resolved recently. Each mapped counter
 then has only a handful of training cycles to bias toward ``taken''
 before it gets remapped, so the warm-up cost dominates the kernel.
-BHT-2's per-PC counters do not suffer this --- they accumulate
+BHT-2's per-PC counters do not suffer this -- they accumulate
 hysteresis across all visits to the same branch. The general lesson
 is that the global-history correlation that the two-level scheme is
 built around only pays off when there is correlation to exploit; on
@@ -370,7 +383,7 @@ $0.739$ ($+3.4\%$). \texttt{bin-search} contains the inner-loop call
 sites where this stretch goal pays off, while on \texttt{vvadd} and
 \texttt{cmplx-mult} the kernel JAL count is zero or one and the IPC
 delta is below counter resolution. The RAS, by contrast, is
-functionally correct but adds zero IPC on these benchmarks ---
+functionally correct but adds zero IPC on these benchmarks --
 \texttt{bp\_bht2\_full} produces the same numbers as
 \texttt{bp\_bht2\_jal} on every benchmark. The reason is that the
 \texttt{test\_stats\_on/off} kernel regions of these ubmarks contain
@@ -408,7 +421,7 @@ the predictor saves are the same cycles in both.
 \sloppy
 
 The proposal called for a two-axis tradeoff analysis (IPC \emph{and}
-post-place-and-route Fmax/utilization) on the lab's FPGA bench --- a
+post-place-and-route Fmax/utilization) on the lab's FPGA bench -- a
 Nexys-4 DDR development board carrying an
 \texttt{xc7a100tcsg324-1} Artix-7 part driven by Vivado 2019.1. The
 bench host (\texttt{bench@10.50.62.45}) hosts a pre-existing Vivado
@@ -503,7 +516,7 @@ two-level full  & 35{,}389 & 18{,}171 & 1{,}722 & $+848$ \\
 \end{tabular}
 \end{table}
 
-The Vivado batch script is structurally generic --- the predictor
+The Vivado batch script is structurally generic -- the predictor
 RTL it drops into the lab tree and the defines it sets do not depend
 on whether the surrounding core is \texttt{riscvlong} or
 \texttt{riscvooo}. Re-targeting it to \texttt{riscvooo} requires
@@ -523,8 +536,8 @@ We treat both as the obvious next-step extension of this work.
 
 The 1-bit and 2-bit BHT designs follow Smith~\cite{smith1981}, who
 introduced the saturating-counter scheme that all subsequent direction
-predictors build on. The two-level adaptive structure --- a global
-history register feeding a pattern history table --- is the
+predictors build on. The two-level adaptive structure -- a global
+history register feeding a pattern history table -- is the
 Yeh \& Patt~\cite{yehpatt1991,yehpatt1992} family, and the specific
 PC$\oplus$GHR indexing variant we implemented is from
 McFarling~\cite{mcfarling1993}, who also introduced tournament
