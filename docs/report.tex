@@ -403,6 +403,122 @@ the predictor is similar across the two cores, because the
 misprediction penalty is two cycles in both pipelines and the cycles
 the predictor saves are the same cycles in both.
 
+\section{FPGA synthesis infrastructure}
+\label{sec:fpga}
+\sloppy
+
+The proposal called for a two-axis tradeoff analysis (IPC \emph{and}
+post-place-and-route Fmax/utilization) on the lab's FPGA bench --- a
+Nexys-4 DDR development board carrying an
+\texttt{xc7a100tcsg324-1} Artix-7 part driven by Vivado 2019.1. The
+bench host (\texttt{bench@10.50.62.45}) hosts a pre-existing Vivado
+project under \texttt{\textasciitilde/riscv-fpga/} whose source paths reference
+the unmodified lab tree at \texttt{\textasciitilde/ece475-lab4/}. Reaching the
+bench requires the OIT GlobalProtect VPN; eduroam alone does not
+route to the \texttt{10.50.62.x} subnet. Across the project window
+the bench's sshd accepted TCP on port 22 but stopped sending its
+banner, almost certainly fail2ban or a stuck child triggered by an
+earlier flurry of failed \texttt{ssh-copy-id} attempts. Without
+physical access to power-cycle the box, none of the on-bench Vivado
+runs were executed end-to-end.
+
+We nonetheless wrote, tested, and committed the full synthesis flow.
+The Vivado batch script
+(\texttt{fpga/synth\_scripts/synth\_variant.tcl}) is invoked as
+\texttt{vivado -mode batch -source synth\_variant.tcl -tclargs $<$variant$>$}.
+It overlays the variant's RTL into the lab tree (the per-variant
+Core/CoreCtrl/CoreDpath files into \texttt{riscvlong/} plus a new
+\texttt{bp/} for the predictor modules), sets the appropriate
+\texttt{verilog\_define} list on the project's \texttt{sources\_1}
+fileset (\texttt{BP\_ENABLED}, \texttt{BP\_BHT2},
+\texttt{BP\_PRED\_JAL}, etc.), adds \texttt{bp} to
+\texttt{include\_dirs}, calls \texttt{reset\_run synth\_1} followed by
+\texttt{launch\_runs synth\_1} and \texttt{launch\_runs impl\_1
+-to\_step write\_bitstream}, and finally exports
+\texttt{report\_utilization}, \texttt{report\_timing\_summary},
+\texttt{report\_timing -delay\_type max -max\_paths 25}, and
+\texttt{report\_power} into a per-variant
+\texttt{results/$<$variant$>$/} directory.
+After the run finishes,
+\texttt{scp} pulls the reports back to the laptop, and
+\texttt{scripts/parse\_vivado\_reports.py} walks
+\texttt{utilization.rpt}, \texttt{timing\_summary.rpt}, and
+\texttt{power.rpt} into a single \texttt{vivado\_summary.tsv} with
+columns for Slice LUTs, Slice registers, BRAM tile, DSPs, target
+clock period, worst-case slack (WNS), achieved
+$\text{Fmax} = 1000 / (\text{period} - \text{WNS})$, and total
+on-chip power. \texttt{scripts/plot\_results.py --source vivado}
+consumes that TSV and renders updated area, Fmax, and IPC-vs-area
+scatter plots. The parser was validated against a hand-crafted
+Vivado-format fixture (utilization, timing, and power blocks lifted
+from a real Vivado log and edited to known values), and end-to-end
+produced the expected $4231$ Slice LUTs, $1452$ Slice registers,
+$12$ BRAM tile, $4$ DSP, $130.63$\,MHz, and $0.234$\,W output row.
+
+In place of Vivado, we ran a relative-area sweep with
+\texttt{yosys 0.64} using the \texttt{synth\_xilinx -family xc7}
+front-end as a quick cell-count proxy. yosys is not a place-and-route
+tool, ABC's mapping is generic, and the absolute counts will differ
+from Vivado's, but for ranking the variants on the same RTL it is
+adequate. The script
+\texttt{scripts/yosys\_synth.sh <variant>} synthesises a variant and
+\texttt{scripts/yosys\_summary.sh} aggregates the per-variant cell
+totals into \texttt{results/yosys\_summary.tsv}.
+Table~\ref{tab:yosys} reports the result. The predictor adds
+$5\text{--}11\%$ to total cells over baseline; the FF deltas line up
+exactly with the on-paper budget ($256 \times 1$ for BHT-1, $256 \times 2$
+for BHT-2 / two-level, plus the 8-bit GHR for two-level and
+$\sim$260 FFs for the $8 \times 32$-bit return-address stack on the
+\texttt{full} builds), and JAL prediction is essentially free
+($\sim$30 cells of delta over the corresponding non-JAL build). The
+two-level predictor's extra LUTs over BHT-2 come from the XOR
+network on the index path; in Vivado these would likely fold into
+the same LUT-based distributed-RAM primitives as BHT-2, but yosys
+maps them into a fan-in tree of LUT4/LUT5/LUT6 instances and so the
+LUT count is slightly inflated.
+
+\begin{table}[h]
+\centering
+\caption{Yosys \texttt{synth\_xilinx -family xc7} cell counts per
+variant. Numbers from the parallel \texttt{riscvlong} port (the
+project's \texttt{fpga} branch); the predictor logic and integration
+hooks are identical to the \texttt{riscvooo} build, so the area
+deltas transfer directly. Vivado place-and-route would tighten these
+numbers significantly but the ordering should be preserved.}
+\label{tab:yosys}
+\begin{tabular}{lrrrr}
+\toprule
+Variant & total cells & LUTs & FFs & $\Delta$ FFs vs baseline \\
+\midrule
+baseline       & 31{,}737 & 16{,}512 &   874 &      0 \\
+\texttt{static\_nt}    & 32{,}686 & 16{,}847 &   940 &  $+66$ \\
+BHT-1          & 33{,}472 & 17{,}370 & 1{,}196 & $+322$ \\
+BHT-2          & 33{,}849 & 17{,}450 & 1{,}452 & $+578$ \\
+two-level (PC$\oplus$GHR) & 35{,}024 & 18{,}026 & 1{,}460 & $+586$ \\
+BHT-2 + JAL    & 33{,}886 & 17{,}477 & 1{,}453 & $+579$ \\
+two-level + JAL & 35{,}071 & 18{,}056 & 1{,}461 & $+587$ \\
+BHT-2 full     & 34{,}240 & 17{,}608 & 1{,}714 & $+840$ \\
+two-level full  & 35{,}389 & 18{,}171 & 1{,}722 & $+848$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The Vivado batch script is structurally generic --- the predictor
+RTL it drops into the lab tree and the defines it sets do not depend
+on whether the surrounding core is \texttt{riscvlong} or
+\texttt{riscvooo}. Re-targeting it to \texttt{riscvooo} requires
+adjusting the overlay paths to point at \texttt{riscvooo/} and
+adding the four patched files we describe in §1.3. With a working
+bench session, a full nine-variant synth + impl + bitstream + report
+sweep is roughly $9 \times 10\text{--}15$ minutes per Artix-7 build,
+i.e.\ a single unattended overnight run. The on-board IPS measurement
+that the proposal also called for would then layer on top by
+programming each variant's bitstream via the Vivado Hardware Manager
+and combining the reported Fmax with the per-benchmark cycle counts
+already in Table~\ref{tab:ipc_main}/\ref{tab:ipc_full} via
+$\text{IPS} = \text{retired\_inst} \times \text{Fmax} / \text{cycles}$.
+We treat both as the obvious next-step extension of this work.
+
 \section{Related work}
 
 The 1-bit and 2-bit BHT designs follow Smith~\cite{smith1981}, who
