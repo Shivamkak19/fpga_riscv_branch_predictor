@@ -15,7 +15,7 @@ proposal:
 1. `bp_static_nt` — always predict not-taken (baseline-equivalent reference)
 2. `bp_bht1`     — 256-entry, 1-bit-per-entry Branch History Table
 3. `bp_bht2`     — 256-entry, 2-bit saturating-counter BHT
-4. `bp_gshare`   — 256-entry GShare with 8-bit Global History Register
+4. `bp_two_level` — 256-entry two-level adaptive predictor with PC⊕GHR-indexed PHT and 8-bit Global History Register
 
 Stretch goals (each gated by a separate define, layered on top of any
 direction predictor):
@@ -24,7 +24,7 @@ direction predictor):
   1-cycle D-stage redirect per JAL.
 - `BP_RAS`      — 8-deep Return Address Stack for JALR returns.
 
-The `bp_bht2_full` and `bp_gshare_full` builds combine direction
+The `bp_bht2_full` and `bp_two_level_full` builds combine direction
 prediction + JAL prediction + RAS for the proposal's headline design
 points.
 
@@ -49,7 +49,7 @@ bp/                NEW — branch-predictor sub-package
   bp_static_nt.v   always-NT (baseline-equivalent)
   bp_bht1.v        1-bit BHT
   bp_bht2.v        2-bit saturating-counter BHT
-  bp_gshare.v      GShare with 2-bit counters + GHR
+  bp_two_level.v   two-level adaptive predictor: PC⊕GHR-indexed PHT, 2-bit counters
   bp_ras.v         8-entry Return Address Stack
   bp_top.v         selectable wrapper (picks one predictor by `BP_*` define)
   bp.mk
@@ -60,7 +60,7 @@ scripts/
   adroit-env.sh    source to set up /home/ECE475 toolchain on adroit
   run_variants.sh  sweep all 9 BP_* variants via lab4 make targets
   plot_results.py  render results/plots/*.png from per-variant TSVs
-  plot_sweep.py    parameter sweep plotter (BHT-2 size + GShare heatmap)
+  plot_sweep.py    parameter sweep plotter (BHT-2 size + two-level (idx,hist) heatmap)
 results/
   <variant>/       per-variant ubmark-*-ooo.out + ubmark.tsv + asm_tests.tsv
   plots/           ipc.png, mispredict_rate.png, summary.md
@@ -118,8 +118,8 @@ same flags, same testbench, same vmh).
 
 ubmark IPC (kernel-only, gated by `csr_stats` per lab4 convention):
 
-| Benchmark           | baseline | static_nt | bht1   | bht2   | gshare |
-|---------------------|---------:|----------:|-------:|-------:|-------:|
+| Benchmark           | baseline | static_nt | BHT-1  | BHT-2  | two-level (PC⊕GHR) |
+|---------------------|---------:|----------:|-------:|-------:|-------------------:|
 | ubmark-vvadd        | 0.8865   | 0.8865    | 0.9115 | 0.9115 | 0.8830 |
 | ubmark-cmplx-mult   | 0.7105   | 0.7105    | 0.7236 | 0.7236 | 0.7194 |
 | ubmark-bin-search   | 0.7048   | 0.7048    | 0.7865 | 0.7952 | 0.7664 |
@@ -128,13 +128,13 @@ ubmark IPC (kernel-only, gated by `csr_stats` per lab4 convention):
 
 With both proposal stretch goals enabled (JAL prediction + RAS):
 
-| Benchmark           | bht2_full | gshare_full |
-|---------------------|----------:|------------:|
-| ubmark-vvadd        | 0.9115    | 0.8830      |
-| ubmark-cmplx-mult   | 0.7239    | 0.7197      |
-| ubmark-bin-search   | 0.8215    | 0.7908      |
-| ubmark-masked-filter| 0.7394    | 0.7354      |
-| **mean**            | **0.799** | **0.782**   |
+| Benchmark           | BHT-2 full | two-level full |
+|---------------------|-----------:|---------------:|
+| ubmark-vvadd        | 0.9115     | 0.8830         |
+| ubmark-cmplx-mult   | 0.7239     | 0.7197         |
+| ubmark-bin-search   | 0.8215     | 0.7908         |
+| ubmark-masked-filter| 0.7394     | 0.7354         |
+| **mean**            | **0.799**  | **0.782**      |
 
 **Sanity check vs lab4 reference** — our `results/baseline/*-ooo.out`
 status / num_cycles / num_inst / ipc lines diff cleanly against

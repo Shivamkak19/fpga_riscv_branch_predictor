@@ -34,19 +34,19 @@ RESULTS = REPO / "results"
 OUT = RESULTS / "plots"
 OUT.mkdir(parents=True, exist_ok=True)
 
-VARIANTS = ["baseline", "bp_static_nt", "bp_bht1", "bp_bht2", "bp_gshare",
-            "bp_bht2_jal", "bp_gshare_jal",
-            "bp_bht2_full", "bp_gshare_full"]
+VARIANTS = ["baseline", "bp_static_nt", "bp_bht1", "bp_bht2", "bp_two_level",
+            "bp_bht2_jal", "bp_two_level_jal",
+            "bp_bht2_full", "bp_two_level_full"]
 VARIANT_LABEL = {
-    "baseline":       "baseline",
-    "bp_static_nt":   "static-NT",
-    "bp_bht1":        "BHT-1",
-    "bp_bht2":        "BHT-2",
-    "bp_gshare":      "GShare",
-    "bp_bht2_jal":    "BHT-2 + JAL",
-    "bp_gshare_jal":  "GShare + JAL",
-    "bp_bht2_full":   "BHT-2 full",
-    "bp_gshare_full": "GShare full",
+    "baseline":          "baseline",
+    "bp_static_nt":      "static-NT",
+    "bp_bht1":           "BHT-1",
+    "bp_bht2":           "BHT-2",
+    "bp_two_level":      "two-level (PC⊕GHR)",
+    "bp_bht2_jal":       "BHT-2 + JAL",
+    "bp_two_level_jal":  "two-level + JAL",
+    "bp_bht2_full":      "BHT-2 full",
+    "bp_two_level_full": "two-level full",
 }
 
 def load(variant):
@@ -94,7 +94,7 @@ print("wrote", OUT / "ipc.png")
 
 # --- Mispredict rate (excluding baseline + static_nt which don't track) ---
 fig, ax = plt.subplots(figsize=(10, 5))
-predictor_variants = ["bp_bht1", "bp_bht2", "bp_gshare"]
+predictor_variants = ["bp_bht1", "bp_bht2", "bp_two_level"]
 W = 0.25
 for i, v in enumerate(predictor_variants):
     rates = []

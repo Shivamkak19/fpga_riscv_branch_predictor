@@ -27,16 +27,16 @@ VARIANT_DEFS=(
   [bp_static_nt]="-DBP_ENABLED -DBP_STATIC_NT"
   [bp_bht1]="-DBP_ENABLED -DBP_BHT1"
   [bp_bht2]="-DBP_ENABLED -DBP_BHT2"
-  [bp_gshare]="-DBP_ENABLED -DBP_GSHARE"
+  [bp_two_level]="-DBP_ENABLED -DBP_TWO_LEVEL"
   [bp_bht2_jal]="-DBP_ENABLED -DBP_BHT2 -DBP_PRED_JAL"
-  [bp_gshare_jal]="-DBP_ENABLED -DBP_GSHARE -DBP_PRED_JAL"
+  [bp_two_level_jal]="-DBP_ENABLED -DBP_TWO_LEVEL -DBP_PRED_JAL"
   [bp_bht2_full]="-DBP_ENABLED -DBP_BHT2 -DBP_PRED_JAL -DBP_RAS"
-  [bp_gshare_full]="-DBP_ENABLED -DBP_GSHARE -DBP_PRED_JAL -DBP_RAS"
+  [bp_two_level_full]="-DBP_ENABLED -DBP_TWO_LEVEL -DBP_PRED_JAL -DBP_RAS"
 )
 
 # Order matters for the report tables.
-ORDER=(baseline bp_static_nt bp_bht1 bp_bht2 bp_gshare \
-       bp_bht2_jal bp_gshare_jal bp_bht2_full bp_gshare_full)
+ORDER=(baseline bp_static_nt bp_bht1 bp_bht2 bp_two_level \
+       bp_bht2_jal bp_two_level_jal bp_bht2_full bp_two_level_full)
 
 if [ $# -gt 0 ]; then
   VARIANTS=("$@")

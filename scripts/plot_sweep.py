@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""plot_sweep.py - render BHT-2 size sweep + GShare (idx, hist) sweep charts
+"""plot_sweep.py - render BHT-2 size sweep + two-level (idx, hist) sweep charts
    from results/sweep/sweep.tsv
 
-Outputs results/sweep/{bht2_size.png, gshare_heatmap.png, sweep_summary.md}.
+Outputs results/sweep/{bht2_size.png, two_level_heatmap.png, sweep_summary.md}.
 """
 
 import csv
@@ -67,26 +67,26 @@ if bht2:
     plt.close()
     print("wrote", OUT / "bht2_size.png")
 
-# --- GShare heatmap: mean mispredict rate over benchmarks, by (idx, hist) ---
-gshare_data = defaultdict(list)  # gshare_data[(idx,hist)] = [misprate_per_bench]
-gshare_idx_set, gshare_hist_set = set(), set()
+# --- two-level heatmap: mean mispredict rate over benchmarks, by (idx, hist) ---
+two_level_data = defaultdict(list)  # two_level_data[(idx,hist)] = [misprate_per_bench]
+two_level_idx_set, two_level_hist_set = set(), set()
 for r in rows:
-    if r["predictor"] != "gshare" or r["hist_bits"] is None:
+    if r["predictor"] != "two_level" or r["hist_bits"] is None:
         continue
     if r["mispredicts"] is None or r["branches"] in (None, 0):
         continue
     rate = 100.0 * r["mispredicts"] / r["branches"]
-    gshare_data[(r["index_bits"], r["hist_bits"])].append(rate)
-    gshare_idx_set.add(r["index_bits"])
-    gshare_hist_set.add(r["hist_bits"])
+    two_level_data[(r["index_bits"], r["hist_bits"])].append(rate)
+    two_level_idx_set.add(r["index_bits"])
+    two_level_hist_set.add(r["hist_bits"])
 
-if gshare_data:
-    idxs  = sorted(gshare_idx_set)
-    hists = sorted(gshare_hist_set)
+if two_level_data:
+    idxs  = sorted(two_level_idx_set)
+    hists = sorted(two_level_hist_set)
     Z = np.zeros((len(hists), len(idxs)))
     for i, hb in enumerate(hists):
         for j, ib in enumerate(idxs):
-            v = gshare_data.get((ib, hb), [])
+            v = two_level_data.get((ib, hb), [])
             Z[i, j] = sum(v) / len(v) if v else float("nan")
 
     fig, ax = plt.subplots(figsize=(7, 5))
@@ -97,7 +97,7 @@ if gshare_data:
     ax.set_yticklabels(hists)
     ax.set_xlabel("INDEX_BITS")
     ax.set_ylabel("HIST_BITS")
-    ax.set_title("GShare mean mispredict rate (%) — averaged over 4 ubmarks")
+    ax.set_title("two-level (PC⊕GHR) mean mispredict rate (%) — averaged over 4 ubmarks")
     for i in range(len(hists)):
         for j in range(len(idxs)):
             v = Z[i, j]
@@ -107,9 +107,9 @@ if gshare_data:
                         fontsize=10)
     fig.colorbar(im, ax=ax, label="mispredict rate (%)")
     plt.tight_layout()
-    plt.savefig(OUT / "gshare_heatmap.png", dpi=130)
+    plt.savefig(OUT / "two_level_heatmap.png", dpi=130)
     plt.close()
-    print("wrote", OUT / "gshare_heatmap.png")
+    print("wrote", OUT / "two_level_heatmap.png")
 
 # --- summary.md ---
 with open(OUT / "sweep_summary.md", "w") as f:
@@ -122,14 +122,14 @@ with open(OUT / "sweep_summary.md", "w") as f:
         for bench, m in sorted(bht2.items()):
             cells = [f"{m.get(i, float('nan')):.2f}" if m.get(i) is not None else "-" for i in idxs]
             f.write(f"| {bench} | " + " | ".join(cells) + " |\n")
-    f.write("\n## GShare mispredict rate (%) — mean over 4 ubmarks\n\n")
-    if gshare_data:
+    f.write("\n## two-level (PC⊕GHR) mispredict rate (%) — mean over 4 ubmarks\n\n")
+    if two_level_data:
         f.write("| HIST_BITS \\ INDEX_BITS | " + " | ".join(str(i) for i in idxs) + " |\n")
         f.write("|---|" + "---:|" * len(idxs) + "\n")
         for hb in hists:
             cells = []
             for ib in idxs:
-                v = gshare_data.get((ib, hb), [])
+                v = two_level_data.get((ib, hb), [])
                 cells.append(f"{(sum(v)/len(v)):.2f}" if v else "-")
             f.write(f"| hist={hb} | " + " | ".join(cells) + " |\n")
 print("wrote", OUT / "sweep_summary.md")

@@ -1,22 +1,24 @@
 //=========================================================================
-// bp_gshare.v - GShare correlating branch direction predictor
+// bp_two_level.v - Two-level branch predictor with PC⊕GHR PHT index
 //=========================================================================
-// Index = PC[INDEX_BITS+1:2] XOR GHR. PHT entries are 2-bit saturating
-// counters as in bp_bht2. Global history register (GHR) is HIST_BITS wide
-// and shifts in the actual outcome on every resolved branch.
+// Two-level adaptive scheme (Yeh & Patt, 1991). Level-1 = global branch
+// history register (GHR); level-2 = a single Pattern History Table (PHT)
+// of 2-bit saturating counters. The PHT is indexed by
+// `PC[INDEX_BITS+1:2] XOR GHR` — the specific PC-XOR-history variant
+// from McFarling 1993, commonly known as "GShare". HIST_BITS and
+// INDEX_BITS are independent build-time parameters.
 //
 // Speculative-update warning: this design only updates the GHR on
 // resolution (in X), NOT on prediction (in F). That keeps a single source
 // of truth and avoids needing a checkpoint stack to roll back the GHR on
 // a mispredict. The cost is that branches that fetched while older
 // branches are still in flight see a slightly stale GHR. Adequate for the
-// performance levels we are targeting; can be revisited if the report
-// shows it as a meaningful loss vs ideal.
+// performance levels we are targeting.
 
-`ifndef BP_GSHARE_V
-`define BP_GSHARE_V
+`ifndef BP_TWO_LEVEL_V
+`define BP_TWO_LEVEL_V
 
-module bp_gshare #(
+module bp_two_level #(
   parameter INDEX_BITS = 8,           // PHT depth = 2^INDEX_BITS
   parameter HIST_BITS  = 8,           // global history width
   parameter PC_BITS    = 32

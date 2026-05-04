@@ -119,12 +119,27 @@ resolved conditional branch, indexed by `update_pc[9:2]`. No tagging.
 `10`=weakly T, `11`=strongly T. Predict taken iff bit 1 set. On reset
 all entries initialize to `01` (weakly NT).
 
-### 3.4 GShare (`bp_gshare.v`)
+### 3.4 Two-level adaptive predictor with PC⊕GHR PHT index (`bp_two_level.v`)
 
-256-entry PHT of 2-bit counters indexed by `PC[9:2] XOR GHR[7:0]`. The
-GHR is shifted left with the resolved direction on every branch
-update at X. Non-speculative GHR (only updated at resolve) — see §6
-for why this matters on these benchmarks.
+This is a **two-level adaptive branch predictor** in the Yeh & Patt
+1991/1992 family. Level-1 is an 8-bit Global History Register (GHR)
+shared across all branches; level-2 is a single Pattern History Table
+(PHT) of 256 × 2-bit saturating counters. The PHT is indexed by
+`PC[9:2] XOR GHR[7:0]` — the specific PC-XOR-history variant from
+McFarling 1993 ("GShare"). The 2-bit counters use the same `00..11`
+hysteresis as `bp_bht2`. The GHR is shifted left with the resolved
+direction on every branch update at X.
+
+Non-speculative GHR: this design only updates the GHR at resolve
+(in X), not at predict time (in F). That keeps a single source of
+truth and avoids the checkpoint stack a speculative-update GHR would
+need for misprediction rollback. The cost is that branches that
+fetched while older branches are still in flight see a slightly stale
+GHR — see §6 for why this matters on these benchmarks.
+
+In the rest of this report and in the plot/table labels we call this
+predictor "two-level (PC⊕GHR)" to make the mechanism explicit; in the
+academic literature it's almost always abbreviated "GShare."
 
 ### 3.5 Return Address Stack (`bp_ras.v`)
 
@@ -142,7 +157,7 @@ the `BP_*` define set at build time:
 ```verilog
 `ifdef BP_STATIC_NT  bp_static_nt  ...
 `elsif BP_BHT1       bp_bht1       ...
-`elsif BP_GSHARE     bp_gshare     ...
+`elsif BP_TWO_LEVEL  bp_two_level  ...
 `else                bp_bht2       ... // default
 `endif
 ```
@@ -276,9 +291,9 @@ bp_top u_bp (
 );
 ```
 
-The 2-bit BHT and GShare both update their counters toward the actual
-outcome (saturating at the endpoints). The 1-bit BHT just overwrites
-with the actual outcome.
+The 2-bit BHT and the two-level predictor both update their counters
+toward the actual outcome (saturating at the endpoints). The 1-bit BHT
+just overwrites with the actual outcome.
 
 ### 4.6 Diagnostic counters (`riscvooo-CoreCtrl.v`, `riscvooo-sim.v`)
 
@@ -307,15 +322,15 @@ every configuration:
 
 | Variant         | passed | failed | error |
 |-----------------|-------:|-------:|------:|
-| baseline        |     47 |      0 |     0 |
-| bp_static_nt    |     47 |      0 |     0 |
-| bp_bht1         |     47 |      0 |     0 |
-| bp_bht2         |     47 |      0 |     0 |
-| bp_gshare       |     47 |      0 |     0 |
-| bp_bht2_jal     |     47 |      0 |     0 |
-| bp_gshare_jal   |     47 |      0 |     0 |
-| bp_bht2_full    |     47 |      0 |     0 |
-| bp_gshare_full  |     47 |      0 |     0 |
+| baseline           |     47 |      0 |     0 |
+| bp_static_nt       |     47 |      0 |     0 |
+| bp_bht1            |     47 |      0 |     0 |
+| bp_bht2            |     47 |      0 |     0 |
+| bp_two_level       |     47 |      0 |     0 |
+| bp_bht2_jal        |     47 |      0 |     0 |
+| bp_two_level_jal   |     47 |      0 |     0 |
+| bp_bht2_full       |     47 |      0 |     0 |
+| bp_two_level_full  |     47 |      0 |     0 |
 
 This includes every branch test (`riscv-beq`, `riscv-bne`, `riscv-blt`,
 `riscv-bge`, `riscv-bltu`, `riscv-bgeu`), every jump test (`riscv-j`,
@@ -379,8 +394,8 @@ unmodified core.
 
 ### 6.1 IPC by variant (kernel-only, lab4 convention)
 
-| Benchmark           | baseline | static_nt | bht1   | bht2   | gshare |
-|---------------------|---------:|----------:|-------:|-------:|-------:|
+| Benchmark           | baseline | static_nt | BHT-1  | BHT-2  | two-level (PC⊕GHR) |
+|---------------------|---------:|----------:|-------:|-------:|-------------------:|
 | ubmark-vvadd        | 0.8865   | 0.8865    | 0.9115 | 0.9115 | 0.8830 |
 | ubmark-cmplx-mult   | 0.7105   | 0.7105    | 0.7236 | 0.7236 | 0.7194 |
 | ubmark-bin-search   | 0.7048   | 0.7048    | 0.7865 | 0.7952 | 0.7664 |
@@ -408,13 +423,13 @@ nearly straight-line code (only 10 and 27 dynamic conditional branches
 in the kernel respectively). The predictor still gets the loop branches
 right; there are simply fewer to win on.
 
-GShare is competitive on the bigger benchmarks but consistently worse
-than BHT-2 on these workloads. The reason is GHR pollution: for a
-single-direction loop branch, the GHR cycles through patterns of
-mostly-`1`s, mapping the same PC to different counters depending on
-how many other taken branches have just resolved. With more diverse
-control flow, GShare's correlation pays off — but on these benchmarks
-it never beats BHT-2.
+The two-level predictor is competitive on the bigger benchmarks but
+consistently worse than BHT-2 on these workloads. The reason is GHR
+pollution: for a single-direction loop branch, the GHR cycles through
+patterns of mostly-`1`s, mapping the same PC to different counters
+depending on how many other taken branches have just resolved. With
+more diverse control flow, the global-history correlation pays off —
+but on these benchmarks it never beats BHT-2.
 
 `ubmark-bin-search` is the hardest benchmark for any direction
 predictor. Binary search compares against data, so each branch's
@@ -424,8 +439,8 @@ direction predictor can do on this workload without value prediction.
 
 ### 6.2 Mispredict rates (kernel only)
 
-| Benchmark           | branches | bht1 misp | bht2 misp | gshare misp |
-|---------------------|---------:|----------:|----------:|------------:|
+| Benchmark           | branches | BHT-1 misp | BHT-2 misp | two-level (PC⊕GHR) misp |
+|---------------------|---------:|-----------:|-----------:|------------------------:|
 | ubmark-vvadd        |       10 |   2 (20.0%) |   2 (20.0%) |  10 (100.0%) |
 | ubmark-cmplx-mult   |       27 |   3 (11.1%) |   3 (11.1%) |  10 ( 37.0%) |
 | ubmark-bin-search   |      246 |  59 (24.0%) |  52 (21.1%) |  76 ( 30.9%) |
@@ -433,11 +448,11 @@ direction predictor can do on this workload without value prediction.
 
 A few observations worth calling out:
 
-- **GShare on `vvadd` is 100% wrong** on the kernel's 10 conditional
-  branches. The GHR happens to land in a state that maps them all to
-  counters the warmup hasn't biased toward "taken" yet. Outside the
-  kernel (during init/verification, where the cycle counter is off)
-  GShare presumably warms up more, but the lab4 metric only sees the
+- **The two-level predictor mispredicts every kernel branch on `vvadd`**.
+  All 10 conditional branches end up mapped via the PC⊕GHR XOR to PHT
+  counters whose warmup hasn't biased them toward "taken" yet. Outside
+  the kernel (during init/verification, where the cycle counter is off)
+  the GHR presumably warms up more, but the lab4 metric only sees the
   kernel.
 - **BHT-2 vs BHT-1 split on `masked-filter`**: 53 vs 96 mispredicts.
   This is the one workload where the 2-bit hysteresis pays off — the
@@ -512,19 +527,19 @@ the RAS would matter more — this design exploration shows the
 
 ### 7.3 Final IPC across all variants (4 ubmarks, kernel-only)
 
-| Variant         | vvadd  | cmplx-mult | bin-search | masked-filter | mean   |
-|-----------------|-------:|-----------:|-----------:|--------------:|-------:|
-| baseline        | 0.8865 |   0.7105   |   0.7048   |    0.6622     | 0.7410 |
-| static-NT       | 0.8865 |   0.7105   |   0.7048   |    0.6622     | 0.7410 |
-| BHT-1           | 0.9115 |   0.7236   |   0.7865   |    0.7064     | 0.7820 |
-| BHT-2           | 0.9115 |   0.7236   |   0.7952   |    0.7153     | 0.7864 |
-| GShare          | 0.8830 |   0.7194   |   0.7664   |    0.7115     | 0.7701 |
-| BHT-2 + JAL     | 0.9115 |   0.7239   |   0.8215   |    0.7394     | 0.7991 |
-| GShare + JAL    | 0.8830 |   0.7197   |   0.7908   |    0.7354     | 0.7822 |
-| BHT-2 full      | 0.9115 |   0.7239   |   0.8215   |    0.7394     | 0.7991 |
-| GShare full     | 0.8830 |   0.7197   |   0.7908   |    0.7354     | 0.7822 |
+| Variant            | vvadd  | cmplx-mult | bin-search | masked-filter | mean   |
+|--------------------|-------:|-----------:|-----------:|--------------:|-------:|
+| baseline           | 0.8865 |   0.7105   |   0.7048   |    0.6622     | 0.7410 |
+| static-NT          | 0.8865 |   0.7105   |   0.7048   |    0.6622     | 0.7410 |
+| BHT-1              | 0.9115 |   0.7236   |   0.7865   |    0.7064     | 0.7820 |
+| BHT-2              | 0.9115 |   0.7236   |   0.7952   |    0.7153     | 0.7864 |
+| two-level (PC⊕GHR) | 0.8830 |   0.7194   |   0.7664   |    0.7115     | 0.7701 |
+| BHT-2 + JAL        | 0.9115 |   0.7239   |   0.8215   |    0.7394     | 0.7991 |
+| two-level + JAL    | 0.8830 |   0.7197   |   0.7908   |    0.7354     | 0.7822 |
+| BHT-2 full         | 0.9115 |   0.7239   |   0.8215   |    0.7394     | 0.7991 |
+| two-level full     | 0.8830 |   0.7197   |   0.7908   |    0.7354     | 0.7822 |
 
-"full" = BHT/GShare + JAL prediction + RAS.
+"full" = BHT or two-level + JAL prediction + RAS.
 
 The Pareto picture (limited to IPC since the area axis is deferred):
 
@@ -533,11 +548,12 @@ The Pareto picture (limited to IPC since the area axis is deferred):
 - `BHT-1 ≈ BHT-2` everywhere except `masked-filter`, where BHT-2's
   hysteresis cuts the mispredict count almost in half (96 → 53). For
   this workload set BHT-2 is the right base predictor.
-- `GShare` is consistently worse than BHT-2 on every benchmark — the
-  GHR doesn't help when each loop's branches are uncorrelated with
-  recent control flow. On a benchmark with strongly correlated
-  branches (e.g. many short conditional bodies inside a tight loop),
-  GShare would be expected to overtake; we don't have those.
+- The **two-level (PC⊕GHR)** predictor is consistently worse than
+  BHT-2 on every benchmark — the GHR doesn't help when each loop's
+  branches are uncorrelated with recent control flow. On a benchmark
+  with strongly correlated branches (e.g. many short conditional
+  bodies inside a tight loop), the two-level scheme's history
+  correlation would be expected to overtake; we don't have those.
 - `JAL prediction` adds **+1.6% mean IPC** on top of BHT-2, all from
   the two ubmarks (`bin-search` and `masked-filter`) that have JALs
   inside the measured kernel.
@@ -561,18 +577,18 @@ mean IPC from 0.741 (baseline) to 0.799 (+7.8%).
   `bp/`, `vc/`, `imuldiv/` source tree with the appropriate define
   set, and the integration is identical to what runs in simulation.
 
-- **Wider GShare configurations.** Longer GHR (e.g. 12 or 16 bits)
-  combined with a larger PHT could overtake BHT-2 on workloads with
-  strong inter-branch correlation. Not promised in the proposal, but
-  the parameter knob is there (`-DBP_HIST_BITS=N`,
+- **Wider two-level (PC⊕GHR) configurations.** Longer GHR (e.g. 12
+  or 16 bits) combined with a larger PHT could overtake BHT-2 on
+  workloads with strong inter-branch correlation. Not promised in the
+  proposal, but the parameter knob is there (`-DBP_HIST_BITS=N`,
   `-DBP_INDEX_BITS=N`).
 
-- **A speculative-update GShare.** The current GShare only updates
-  the GHR at resolve time (X). Speculatively updating at predict time
-  (F) and snapshotting on every branch for rollback on mispredict
-  would close a small remaining gap, at the cost of substantially
-  more state. For the IPC range these benchmarks exercise the
-  non-speculative GHR is sufficient.
+- **A speculative-update two-level scheme.** The current design only
+  updates the GHR at resolve time (X). Speculatively updating at
+  predict time (F) and snapshotting on every branch for rollback on
+  mispredict would close a small remaining gap, at the cost of
+  substantially more state. For the IPC range these benchmarks
+  exercise the non-speculative GHR is sufficient.
 
 ---
 

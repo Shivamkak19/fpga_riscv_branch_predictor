@@ -2,7 +2,7 @@
 
 ## IPC
 
-| benchmark | baseline | static-NT | BHT-1 | BHT-2 | GShare | BHT-2 + JAL | GShare + JAL | BHT-2 full | GShare full |
+| benchmark | baseline | static-NT | BHT-1 | BHT-2 | two-level (PC⊕GHR) | BHT-2 + JAL | two-level + JAL | BHT-2 full | two-level full |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | ubmark-bin-search | 0.7048 | 0.7048 | 0.7865 | 0.7952 | 0.7664 | 0.8215 | 0.7908 | 0.8215 | 0.7908 |
 | ubmark-cmplx-mult | 0.7105 | 0.7105 | 0.7236 | 0.7236 | 0.7194 | 0.7239 | 0.7197 | 0.7239 | 0.7197 |
@@ -11,7 +11,7 @@
 
 ## Mispredict rate (%)
 
-| benchmark | branches | BHT-1 | BHT-2 | GShare |
+| benchmark | branches | BHT-1 | BHT-2 | two-level (PC⊕GHR) |
 |---|---:|---:|---:|---:|
 | ubmark-bin-search | 246 | 23.98 | 21.14 | 30.89 |
 | ubmark-cmplx-mult | 27 | 11.11 | 11.11 | 37.04 |
