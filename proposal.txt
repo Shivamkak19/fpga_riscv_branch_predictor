@@ -1,0 +1,15 @@
+ECE 475 Term Project Proposal
+Shivam Kak: sk3686@princeton.edu | Wonju Lee: wl2527@princeton.edu | Spring 2026
+
+
+Topic: FPGA-Based Branch Predictor Design Exploration for a Dual-Issue Superscalar RISC-V Processor
+                                                                                                                                                                             
+The dual-issue in-order superscalar RISC-V processor we have designed for Lab 3 currently has no branch prediction. Branches resolve in the X0 stage, incurring a 3-cycle misprediction penalty that squashes both pipeline lanes. For this project, we will implement and compare three branch predictor designs of increasing complexity:
+(i) a simple 1-bit Branch History Table (BHT)
+(ii) 2-bit saturating counter BHT
+(iii) GShare correlating predictor that XORs global branch history with the PC to index a pattern history table (widely used in modern day processors; will need to research more on this). 
+If time permits, we will also add a Return Address Stack (RAS) to improve JALR prediction for function returns. Each predictor will be integrated into the fetch stage of our existing processor and evaluated in simulation using the course microbenchmarks to measure IPC improvement, misprediction rate, and CPI.
+
+Beyond simulation, we will synthesize each processor variant onto an FPGA to analyze the hardware cost of branch prediction. In the process, we will develop practical skills in timing-driven design, constraint writing, and FPGA tooling. Using FPGA synthesis reports, we will compare each design in terms of LUT/FF utilization, maximum clock frequency (Fmax), and critical path location. We seek to conduct a two-dimensional tradeoff analysis of whether a more complex predictor like GShare may deliver higher IPC, but if it lengthens the critical path and reduces Fmax, the net performance (instructions per second) may not improve proportionally. Our report will quantify this tradeoff and identify which predictor design offers the best overall performance per area on real hardware, providing insight into why commercial processors choose the predictor designs they do.
+
+**Requested Feedback: are there any FPGAs we would be able to use for this project from the ECE department?**

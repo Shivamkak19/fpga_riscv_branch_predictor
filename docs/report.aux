@@ -1,0 +1,54 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyperFirstAtBeginDocument{\AtBeginDocument}
+\HyperFirstAtBeginDocument{\ifx\hyper@anchor\@undefined
+\global\let\oldcontentsline\contentsline
+\gdef\contentsline#1#2#3#4{\oldcontentsline{#1}{#2}{#3}}
+\global\let\oldnewlabel\newlabel
+\gdef\newlabel#1#2{\newlabelxx{#1}#2}
+\gdef\newlabelxx#1#2#3#4#5#6{\oldnewlabel{#1}{{#2}{#3}}}
+\AtEndDocument{\ifx\hyper@anchor\@undefined
+\let\contentsline\oldcontentsline
+\let\newlabel\oldnewlabel
+\fi}
+\fi}
+\global\let\hyper@last\relax 
+\gdef\HyperFirstAtBeginDocument#1{#1}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Design}{1}{section.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.1}Overview and proposal scope}{1}{subsection.1.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.2}Predictor sub-package}{1}{subsection.1.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.3}Integration into \texttt  {riscvooo}}{2}{subsection.1.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Methodology}{2}{section.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Evaluation}{3}{section.3}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces IPC by variant (kernel-only, lab4 convention). Five-variant view; \texttt  {static\_nt} is the integration-overhead control.}}{3}{table.1}\protected@file@percent }
+\newlabel{tab:ipc_main}{{1}{3}{IPC by variant (kernel-only, lab4 convention). Five-variant view; \texttt {static\_nt} is the integration-overhead control}{table.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces IPC with the proposal stretch goals (JAL prediction at F, 8-deep RAS for JALR returns) layered on top of BHT-2 and the two-level predictor. ``full'' = direction predictor + \texttt  {BP\_PRED\_JAL} + \texttt  {BP\_RAS}.}}{3}{table.2}\protected@file@percent }
+\newlabel{tab:ipc_full}{{2}{3}{IPC with the proposal stretch goals (JAL prediction at F, 8-deep RAS for JALR returns) layered on top of BHT-2 and the two-level predictor. ``full'' = direction predictor + \texttt {BP\_PRED\_JAL} + \texttt {BP\_RAS}}{table.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Conditional branches in the kernel region and mispredicts per direction predictor. Percentages are mispredicts/branches.}}{3}{table.3}\protected@file@percent }
+\newlabel{tab:misp}{{3}{3}{Conditional branches in the kernel region and mispredicts per direction predictor. Percentages are mispredicts/branches}{table.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Discussion}{4}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}FPGA synthesis infrastructure}{4}{section.4}\protected@file@percent }
+\newlabel{sec:fpga}{{4}{4}{FPGA synthesis infrastructure}{section.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Yosys \texttt  {synth\_xilinx -family xc7} cell counts per variant. Numbers from the parallel \texttt  {riscvlong} port (the project's \texttt  {fpga} branch); the predictor logic and integration hooks are identical to the \texttt  {riscvooo} build, so the area deltas transfer directly. Vivado place-and-route would tighten these numbers significantly but the ordering should be preserved.}}{5}{table.4}\protected@file@percent }
+\newlabel{tab:yosys}{{4}{5}{Yosys \texttt {synth\_xilinx -family xc7} cell counts per variant. Numbers from the parallel \texttt {riscvlong} port (the project's \texttt {fpga} branch); the predictor logic and integration hooks are identical to the \texttt {riscvooo} build, so the area deltas transfer directly. Vivado place-and-route would tighten these numbers significantly but the ordering should be preserved}{table.4}{}}
+\citation{smith1981}
+\citation{yehpatt1991}
+\citation{yehpatt1992}
+\citation{mcfarling1993}
+\citation{kaeliemma1991}
+\citation{hp6e}
+\citation{jimenez2001}
+\citation{seznec2006tage}
+\bibcite{smith1981}{1}
+\bibcite{yehpatt1991}{2}
+\bibcite{yehpatt1992}{3}
+\bibcite{mcfarling1993}{4}
+\bibcite{kaeliemma1991}{5}
+\bibcite{jimenez2001}{6}
+\bibcite{seznec2006tage}{7}
+\bibcite{hp6e}{8}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Related work}{6}{section.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion}{6}{section.6}\protected@file@percent }
+\gdef \@abspage@last{6}
